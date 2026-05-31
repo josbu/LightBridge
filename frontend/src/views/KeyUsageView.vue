@@ -431,7 +431,7 @@ const appStore = useAppStore()
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'LightBridge')
 const siteLogo = computed(() => appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '')
 const docUrl = computed(() => appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '')
-const githubUrl = 'https://github.com/Wei-Shaw/LightBridge'
+const githubUrl = 'https://github.com/WilliamWang1721/LightBridge'
 
 // ==================== Theme (same as HomeView) ====================
 
