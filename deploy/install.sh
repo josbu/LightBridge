@@ -37,6 +37,14 @@ SERVICE_NAME="LightBridge"
 SERVICE_USER="LightBridge"
 CONFIG_DIR="/etc/LightBridge"
 
+# Active install target. Upgrade commands may point these at a legacy
+# Sub2API systemd deployment so the binary is replaced in place.
+ACTIVE_INSTALL_DIR="$INSTALL_DIR"
+ACTIVE_BINARY_PATH="$INSTALL_DIR/LightBridge"
+ACTIVE_SERVICE_NAME="$SERVICE_NAME"
+ACTIVE_SERVICE_USER="$SERVICE_USER"
+ACTIVE_LEGACY_INSTALL="false"
+
 # Server configuration (will be set by user)
 SERVER_HOST="0.0.0.0"
 SERVER_PORT="8080"
@@ -564,16 +572,119 @@ validate_version() {
 
 # Get current installed version
 get_current_version() {
-    if [ -f "$INSTALL_DIR/LightBridge" ]; then
+    local binary_path="${1:-${ACTIVE_BINARY_PATH:-$INSTALL_DIR/LightBridge}}"
+
+    if [ -f "$binary_path" ]; then
         # Use grep -E for better compatibility (works on macOS and Linux)
-        "$INSTALL_DIR/LightBridge" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
+        "$binary_path" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
     else
         echo "not_installed"
     fi
 }
 
+service_exists() {
+    local service="$1"
+
+    if ! command -v systemctl &> /dev/null; then
+        return 1
+    fi
+
+    local fragment
+    fragment=$(systemctl show -p FragmentPath --value "$service" 2>/dev/null || true)
+    [ -n "$fragment" ] && [ "$fragment" != "n/a" ]
+}
+
+get_service_exec_binary() {
+    local service="$1"
+
+    if ! command -v systemctl &> /dev/null; then
+        return 1
+    fi
+
+    systemctl show -p ExecStart --value "$service" 2>/dev/null \
+        | tr ' ' '\n' \
+        | sed -n 's/^path=//p' \
+        | head -1
+}
+
+get_service_user() {
+    local service="$1"
+
+    if ! command -v systemctl &> /dev/null; then
+        return 1
+    fi
+
+    systemctl show -p User --value "$service" 2>/dev/null | head -1
+}
+
+set_active_install() {
+    local binary_path="$1"
+    local service_name="$2"
+    local default_user="$3"
+    local legacy="${4:-false}"
+    local service_user
+
+    service_user=$(get_service_user "$service_name" 2>/dev/null || true)
+    if [ -z "$service_user" ]; then
+        service_user="$default_user"
+    fi
+
+    ACTIVE_BINARY_PATH="$binary_path"
+    ACTIVE_INSTALL_DIR=$(dirname "$binary_path")
+    ACTIVE_SERVICE_NAME="$service_name"
+    ACTIVE_SERVICE_USER="$service_user"
+    ACTIVE_LEGACY_INSTALL="$legacy"
+}
+
+detect_existing_install() {
+    ACTIVE_INSTALL_DIR="$INSTALL_DIR"
+    ACTIVE_BINARY_PATH="$INSTALL_DIR/LightBridge"
+    ACTIVE_SERVICE_NAME="$SERVICE_NAME"
+    ACTIVE_SERVICE_USER="$SERVICE_USER"
+    ACTIVE_LEGACY_INSTALL="false"
+
+    if [ -f "$ACTIVE_BINARY_PATH" ]; then
+        set_active_install "$ACTIVE_BINARY_PATH" "$SERVICE_NAME" "$SERVICE_USER" "false"
+        return 0
+    fi
+
+    local service_binary
+    if service_exists "sub2api"; then
+        service_binary=$(get_service_exec_binary "sub2api" 2>/dev/null || true)
+        if [ -n "$service_binary" ] && [ -f "$service_binary" ]; then
+            set_active_install "$service_binary" "sub2api" "sub2api" "true"
+            return 0
+        fi
+    fi
+
+    local binary_path
+    for binary_path in /opt/sub2api/sub2api /opt/sub2api/LightBridge /usr/local/bin/sub2api; do
+        if [ -f "$binary_path" ]; then
+            set_active_install "$binary_path" "sub2api" "sub2api" "true"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+set_installed_binary_owner() {
+    local binary_path="$1"
+    local backup_path="$2"
+    local service_user="$3"
+
+    if [ -n "$service_user" ] && id "$service_user" &>/dev/null; then
+        chown "$service_user:$service_user" "$binary_path" 2>/dev/null || true
+    elif [ -f "$backup_path" ]; then
+        chown --reference="$backup_path" "$binary_path" 2>/dev/null || true
+    fi
+}
+
 # Download and extract
 download_and_extract() {
+    local target_binary="${1:-$INSTALL_DIR/LightBridge}"
+    local target_dir
+    target_dir=$(dirname "$target_binary")
     local version_num=${LATEST_VERSION#v}
     local archive_name="LightBridge_${version_num}_${OS}_${ARCH}.tar.gz"
     local download_url="https://github.com/${GITHUB_REPO}/releases/download/${LATEST_VERSION}/${archive_name}"
@@ -613,18 +724,18 @@ download_and_extract() {
     tar -xzf "$TEMP_DIR/$archive_name" -C "$TEMP_DIR"
 
     # Create install directory
-    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$target_dir"
 
     # Copy binary
-    cp "$TEMP_DIR/LightBridge" "$INSTALL_DIR/LightBridge"
-    chmod +x "$INSTALL_DIR/LightBridge"
+    cp "$TEMP_DIR/LightBridge" "$target_binary"
+    chmod +x "$target_binary"
 
     # Copy deploy files if they exist in the archive
     if [ -d "$TEMP_DIR/deploy" ]; then
-        cp -r "$TEMP_DIR/deploy/"* "$INSTALL_DIR/" 2>/dev/null || true
+        cp -r "$TEMP_DIR/deploy/"* "$target_dir/" 2>/dev/null || true
     fi
 
-    print_success "$(msg 'binary_installed') $INSTALL_DIR/LightBridge"
+    print_success "$(msg 'binary_installed') $target_binary"
 }
 
 # Create system user
@@ -812,39 +923,43 @@ print_completion() {
 
 # Upgrade function
 upgrade() {
-    # Check if LightBridge is installed
-    if [ ! -f "$INSTALL_DIR/LightBridge" ]; then
+    if ! detect_existing_install; then
         print_error "$(msg 'not_installed')"
         print_info "$(msg 'fresh_install_hint'): $0 install"
         exit 1
     fi
 
     print_info "$(msg 'upgrading')"
+    print_info "Install target: $ACTIVE_BINARY_PATH"
+    if [ "$ACTIVE_LEGACY_INSTALL" = "true" ]; then
+        print_warning "Detected legacy Sub2API systemd deployment; upgrading binary in place."
+    fi
 
     # Get current version
-    CURRENT_VERSION=$("$INSTALL_DIR/LightBridge" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    CURRENT_VERSION=$(get_current_version "$ACTIVE_BINARY_PATH")
     print_info "$(msg 'current_version'): $CURRENT_VERSION"
 
     # Stop service
-    if systemctl is-active --quiet LightBridge; then
+    if systemctl is-active --quiet "$ACTIVE_SERVICE_NAME"; then
         print_info "$(msg 'stopping_service')"
-        systemctl stop LightBridge
+        systemctl stop "$ACTIVE_SERVICE_NAME"
     fi
 
     # Backup current binary
-    cp "$INSTALL_DIR/LightBridge" "$INSTALL_DIR/LightBridge.backup"
-    print_info "$(msg 'backup_created'): $INSTALL_DIR/LightBridge.backup"
+    local backup_path="${ACTIVE_BINARY_PATH}.backup.$(date +%Y%m%d%H%M%S)"
+    cp "$ACTIVE_BINARY_PATH" "$backup_path"
+    print_info "$(msg 'backup_created'): $backup_path"
 
     # Download and install new version
     get_latest_version
-    download_and_extract
+    download_and_extract "$ACTIVE_BINARY_PATH"
 
     # Set permissions
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/LightBridge"
+    set_installed_binary_owner "$ACTIVE_BINARY_PATH" "$backup_path" "$ACTIVE_SERVICE_USER"
 
     # Start service
     print_info "$(msg 'starting_service')"
-    systemctl start LightBridge
+    systemctl start "$ACTIVE_SERVICE_NAME"
 
     print_success "$(msg 'upgrade_complete')"
 }
@@ -854,11 +969,14 @@ upgrade() {
 install_version() {
     local target_version="$1"
 
-    # Check if LightBridge is installed
-    if [ ! -f "$INSTALL_DIR/LightBridge" ]; then
+    if ! detect_existing_install; then
         print_error "$(msg 'not_installed')"
         print_info "$(msg 'fresh_install_hint'): $0 install -v $target_version"
         exit 1
+    fi
+    print_info "Install target: $ACTIVE_BINARY_PATH"
+    if [ "$ACTIVE_LEGACY_INSTALL" = "true" ]; then
+        print_warning "Detected legacy Sub2API systemd deployment; installing binary in place."
     fi
 
     # Validate and normalize version
@@ -868,7 +986,7 @@ install_version() {
 
     # Get current version
     local current_version
-    current_version=$(get_current_version)
+    current_version=$(get_current_version "$ACTIVE_BINARY_PATH")
     print_info "$(msg 'current_version'): $current_version"
 
     # Check if same version
@@ -878,44 +996,46 @@ install_version() {
     fi
 
     # Stop service if running
-    if systemctl is-active --quiet LightBridge; then
+    if systemctl is-active --quiet "$ACTIVE_SERVICE_NAME"; then
         print_info "$(msg 'stopping_service')"
-        systemctl stop LightBridge
+        systemctl stop "$ACTIVE_SERVICE_NAME"
     fi
 
     # Backup current binary (for potential recovery)
-    if [ -f "$INSTALL_DIR/LightBridge" ]; then
+    local backup_path=""
+    if [ -f "$ACTIVE_BINARY_PATH" ]; then
         local backup_name
         if [ "$current_version" != "unknown" ] && [ "$current_version" != "not_installed" ]; then
-            backup_name="LightBridge.backup.${current_version}"
+            backup_name="$(basename "$ACTIVE_BINARY_PATH").backup.${current_version}"
         else
-            backup_name="LightBridge.backup.$(date +%Y%m%d%H%M%S)"
+            backup_name="$(basename "$ACTIVE_BINARY_PATH").backup.$(date +%Y%m%d%H%M%S)"
         fi
-        cp "$INSTALL_DIR/LightBridge" "$INSTALL_DIR/$backup_name"
-        print_info "$(msg 'backup_created'): $INSTALL_DIR/$backup_name"
+        backup_path="$ACTIVE_INSTALL_DIR/$backup_name"
+        cp "$ACTIVE_BINARY_PATH" "$backup_path"
+        print_info "$(msg 'backup_created'): $backup_path"
     fi
 
     # Set LATEST_VERSION to the target version for download_and_extract
     LATEST_VERSION="$target_version"
 
     # Download and install
-    download_and_extract
+    download_and_extract "$ACTIVE_BINARY_PATH"
 
     # Set permissions
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/LightBridge"
+    set_installed_binary_owner "$ACTIVE_BINARY_PATH" "$backup_path" "$ACTIVE_SERVICE_USER"
 
     # Start service
     print_info "$(msg 'starting_service')"
-    if systemctl start LightBridge; then
+    if systemctl start "$ACTIVE_SERVICE_NAME"; then
         print_success "$(msg 'service_started')"
     else
         print_error "$(msg 'service_start_failed')"
-        print_info "sudo journalctl -u LightBridge -n 50"
+        print_info "sudo journalctl -u $ACTIVE_SERVICE_NAME -n 50"
     fi
 
     # Print completion message
     local new_version
-    new_version=$(get_current_version)
+    new_version=$(get_current_version "$ACTIVE_BINARY_PATH")
     echo ""
     echo "=============================================="
     print_success "$(msg 'install_version_complete')"
