@@ -374,21 +374,21 @@ create_backup() {
   backup_database "source" "$SOURCE_DRIVER" "$SOURCE_DSN" "$BACKUP_DIR/db"
   backup_database "target" "$TARGET_DRIVER" "$TARGET_DSN" "$BACKUP_DIR/db"
 
-  cat > "$BACKUP_DIR/manifest.env" <<EOF
-CREATED_AT="$timestamp"
-SOURCE_DRIVER="$SOURCE_DRIVER"
-TARGET_DRIVER="$TARGET_DRIVER"
-SOURCE_DSN="$SOURCE_DSN"
-TARGET_DSN="$TARGET_DSN"
-SOURCE_CONFIG="$SOURCE_CONFIG"
-TARGET_CONFIG="$TARGET_CONFIG"
-LIGHTBRIDGE_DIR="$LIGHTBRIDGE_DIR"
-SUB2API_DIR="$SUB2API_DIR"
-LIGHTBRIDGE_CONFIG_DIR="$LIGHTBRIDGE_CONFIG_DIR"
-SUB2API_CONFIG_DIR="$SUB2API_CONFIG_DIR"
-LIGHTBRIDGE_SERVICE="$LIGHTBRIDGE_SERVICE"
-SUB2API_SERVICE="$SUB2API_SERVICE"
-EOF
+  {
+    printf 'CREATED_AT=%q\n' "$timestamp"
+    printf 'SOURCE_DRIVER=%q\n' "$SOURCE_DRIVER"
+    printf 'TARGET_DRIVER=%q\n' "$TARGET_DRIVER"
+    printf 'SOURCE_DSN=%q\n' "$SOURCE_DSN"
+    printf 'TARGET_DSN=%q\n' "$TARGET_DSN"
+    printf 'SOURCE_CONFIG=%q\n' "$SOURCE_CONFIG"
+    printf 'TARGET_CONFIG=%q\n' "$TARGET_CONFIG"
+    printf 'LIGHTBRIDGE_DIR=%q\n' "$LIGHTBRIDGE_DIR"
+    printf 'SUB2API_DIR=%q\n' "$SUB2API_DIR"
+    printf 'LIGHTBRIDGE_CONFIG_DIR=%q\n' "$LIGHTBRIDGE_CONFIG_DIR"
+    printf 'SUB2API_CONFIG_DIR=%q\n' "$SUB2API_CONFIG_DIR"
+    printf 'LIGHTBRIDGE_SERVICE=%q\n' "$LIGHTBRIDGE_SERVICE"
+    printf 'SUB2API_SERVICE=%q\n' "$SUB2API_SERVICE"
+  } > "$BACKUP_DIR/manifest.env"
   ok "Backup created: $BACKUP_DIR"
 }
 
@@ -473,7 +473,6 @@ download_lightbridge_release() {
   version_num="${version#v}"
   archive="LightBridge_${version_num}_${os}_${arch}.tar.gz"
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
 
   log "Downloading LightBridge $version..."
   curl -fsSL "https://github.com/${GITHUB_REPO}/releases/download/${version}/${archive}" -o "$tmp/$archive"
@@ -481,6 +480,7 @@ download_lightbridge_release() {
   mkdir -p "$(dirname "$LIGHTBRIDGE_BIN")"
   cp "$tmp/LightBridge" "$LIGHTBRIDGE_BIN"
   chmod +x "$LIGHTBRIDGE_BIN"
+  rm -rf "$tmp"
   ok "Installed LightBridge binary: $LIGHTBRIDGE_BIN"
 }
 
@@ -680,8 +680,10 @@ rollback_database() {
   local dir="$1"
   local manifest="$dir/manifest.env"
   local restore_dsn="$TARGET_DSN"
-  [[ -f "$manifest" ]] && # shellcheck disable=SC1090
+  if [[ -f "$manifest" ]]; then
+    # shellcheck disable=SC1090
     source "$manifest"
+  fi
   [[ -n "$restore_dsn" ]] || restore_dsn="${TARGET_DSN:-}"
   [[ -n "$restore_dsn" ]] || { warn "No target DSN available; database rollback skipped."; return 0; }
 
