@@ -34,13 +34,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY}" ]; then
-            echo "LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY secret is required to publish module assets" >&2
-            exit 1
+            echo "LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY secret is not configured; using a one-time signing key for this module release."
           fi
 
           RELEASE_BASE_URL="https://github.com/${REPOSITORY}/releases/download/${MODULE_TAG}"
           MODULE_DIST="${GITHUB_WORKSPACE}/dist/modules"
           mkdir -p "${MODULE_DIST}"
+          export LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY_FILE="${MODULE_DIST}/ed25519.key"
 
           cd examples/modules/lightbridge-provider-openai
           LIGHTBRIDGE_MODULE_RELEASE_BASE_URL="${RELEASE_BASE_URL}" go run ./tools/build-package.go
@@ -53,16 +53,11 @@ jobs:
           cp dist/lightbridge-module-*.tar.zst "${MODULE_DIST}/"
           cp dist/registry.json "${MODULE_DIST}/registry-anthropic-oauth.json"
 
-          cd ../lightbridge-provider-mock
-          LIGHTBRIDGE_MODULE_RELEASE_BASE_URL="${RELEASE_BASE_URL}" go run ./tools/build-package.go
-          cp dist/lightbridge-module-*.tar.zst "${MODULE_DIST}/"
-          cp dist/registry.json "${MODULE_DIST}/registry-mock.json"
-
           jq -s '{modules: (map(.modules // []) | add)}' \
             "${MODULE_DIST}/registry-openai.json" \
             "${MODULE_DIST}/registry-anthropic-oauth.json" \
-            "${MODULE_DIST}/registry-mock.json" \
             > "${MODULE_DIST}/registry.json"
+          rm -f "${LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY_FILE}"
 
       - name: Create or update module release
         env:

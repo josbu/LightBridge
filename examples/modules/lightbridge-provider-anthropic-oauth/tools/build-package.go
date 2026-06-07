@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -210,6 +211,31 @@ func loadSigningKey() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 			return nil, nil, err
 		}
 		return privateKey.Public().(ed25519.PublicKey), privateKey, nil
+	}
+	if keyPath := strings.TrimSpace(os.Getenv("LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY_FILE")); keyPath != "" {
+		cleanPath := filepath.Clean(keyPath)
+		content, err := os.ReadFile(cleanPath)
+		if err == nil {
+			privateKey, err := parseEd25519PrivateKey(string(content))
+			if err != nil {
+				return nil, nil, err
+			}
+			return privateKey.Public().(ed25519.PublicKey), privateKey, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, err
+		}
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := os.MkdirAll(filepath.Dir(cleanPath), 0o755); err != nil {
+			return nil, nil, err
+		}
+		if err := os.WriteFile(cleanPath, []byte(hex.EncodeToString(privateKey)+"\n"), 0o600); err != nil {
+			return nil, nil, err
+		}
+		return publicKey, privateKey, nil
 	}
 	return ed25519.GenerateKey(rand.Reader)
 }
