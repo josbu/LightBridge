@@ -79,6 +79,7 @@ type Config struct {
 	Default                 DefaultConfig                 `mapstructure:"default"`
 	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
 	Pricing                 PricingConfig                 `mapstructure:"pricing"`
+	Modules                 ModuleConfig                  `mapstructure:"modules"`
 	Gateway                 GatewayConfig                 `mapstructure:"gateway"`
 	APIKeyAuth              APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
 	SubscriptionCache       SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
@@ -544,6 +545,14 @@ type PricingConfig struct {
 	UpdateIntervalHours int `mapstructure:"update_interval_hours"`
 	// 哈希校验间隔（分钟）
 	HashCheckIntervalMinutes int `mapstructure:"hash_check_interval_minutes"`
+}
+
+type ModuleConfig struct {
+	DataDir                   string `mapstructure:"data_dir"`
+	SignaturePublicKeyPath    string `mapstructure:"signature_public_key_path"`
+	MarketplaceRegistryPath   string `mapstructure:"marketplace_registry_path"`
+	MarketplaceRegistryURL    string `mapstructure:"marketplace_registry_url"`
+	MarketplaceTimeoutSeconds int    `mapstructure:"marketplace_timeout_seconds"`
 }
 
 type ServerConfig struct {
@@ -1582,6 +1591,13 @@ func setDefaults() {
 	viper.SetDefault("billing.circuit_breaker.half_open_requests", 3)
 	viper.SetDefault("billing.user_platform_quota_cache_ttl_seconds", 86400)
 	viper.SetDefault("billing.user_platform_quota_sentinel_ttl_seconds", 3600)
+
+	// Modules
+	viper.SetDefault("modules.data_dir", "data")
+	viper.SetDefault("modules.signature_public_key_path", "")
+	viper.SetDefault("modules.marketplace_registry_path", "")
+	viper.SetDefault("modules.marketplace_registry_url", "https://github.com/WilliamWang1721/LightBridge/releases/download/module-migration-20260606/registry.json")
+	viper.SetDefault("modules.marketplace_timeout_seconds", 20)
 
 	// Turnstile
 	viper.SetDefault("turnstile.required", false)

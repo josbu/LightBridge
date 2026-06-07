@@ -1,0 +1,73 @@
+name: Module Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Module release tag (for example module-migration-20260606)'
+        required: true
+        type: string
+        default: module-migration-20260606
+
+permissions:
+  contents: write
+
+jobs:
+  publish-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache-dependency-path: backend/go.sum
+
+      - name: Build module assets
+        env:
+          MODULE_TAG: ${{ github.event.inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY: ${{ secrets.LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY}" ]; then
+            echo "LIGHTBRIDGE_MODULE_SIGNING_PRIVATE_KEY secret is required to publish module assets" >&2
+            exit 1
+          fi
+
+          RELEASE_BASE_URL="https://github.com/${REPOSITORY}/releases/download/${MODULE_TAG}"
+          MODULE_DIST="${GITHUB_WORKSPACE}/dist/modules"
+          mkdir -p "${MODULE_DIST}"
+
+          cd examples/modules/lightbridge-provider-openai
+          LIGHTBRIDGE_MODULE_RELEASE_BASE_URL="${RELEASE_BASE_URL}" go run ./tools/build-package.go
+          cp dist/lightbridge-module-*.tar.zst "${MODULE_DIST}/"
+          cp dist/ed25519.pub "${MODULE_DIST}/ed25519.pub"
+          cp dist/registry.json "${MODULE_DIST}/registry-openai.json"
+
+          cd ../lightbridge-provider-mock
+          LIGHTBRIDGE_MODULE_RELEASE_BASE_URL="${RELEASE_BASE_URL}" go run ./tools/build-package.go
+          cp dist/lightbridge-module-*.tar.zst "${MODULE_DIST}/"
+          cp dist/registry.json "${MODULE_DIST}/registry-mock.json"
+
+          jq -s '{modules: (map(.modules // []) | add)}' \
+            "${MODULE_DIST}/registry-openai.json" \
+            "${MODULE_DIST}/registry-mock.json" \
+            > "${MODULE_DIST}/registry.json"
+
+      - name: Create or update module release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODULE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "${MODULE_TAG}" >/dev/null 2>&1; then
+            gh release create "${MODULE_TAG}" \
+              --title "LightBridge module packages ${MODULE_TAG}" \
+              --prerelease \
+              --notes "Standalone module packages for LightBridge module migration and one-click module installation."
+          fi
+          gh release upload "${MODULE_TAG}" dist/modules/registry.json dist/modules/ed25519.pub dist/modules/lightbridge-module-*.tar.zst --clobber

@@ -382,6 +382,10 @@ sudo ./install.sh upgrade
 # Migrate a legacy Sub2API binary/systemd deployment to LightBridge
 sudo ./install.sh migrate -v v0.0.1
 
+# Full Sub2API migration, including accounts, OpenAI Provider module,
+# Claude/Gemini compatibility markers, backup, and rollback support
+sudo ./sub2api-full-migrate.sh migrate -v v0.0.1
+
 # Uninstall
 sudo ./install.sh uninstall
 ```
@@ -407,6 +411,49 @@ Migration backups are stored under:
 
 ```text
 /opt/LightBridge-migration-backups/<timestamp>
+```
+
+### Full Sub2API Data Migration
+
+For a complete migration of Sub2API accounts and provider data, use the dedicated full migration script:
+
+```bash
+sudo ./sub2api-full-migrate.sh migrate -v v0.0.1
+```
+
+The full migration script:
+
+- detects legacy and target `config.yaml` files and database DSNs
+- backs up `/opt/sub2api`, `/etc/sub2api`, `/opt/LightBridge`, `/etc/LightBridge`, and PostgreSQL dumps when `pg_dump` is available
+- installs or reuses the LightBridge binary and runs database migrations before importing data
+- calls `backend/cmd/sub2api-migrate` to import proxies and accounts
+- installs and enables the OpenAI Provider module unless `--skip-openai-provider` is passed
+- migrates Claude and Gemini accounts into LightBridge compatibility mode
+- writes a JSON migration report and rollback manifest into the backup directory
+
+Common non-interactive usage:
+
+```bash
+sudo ./sub2api-full-migrate.sh migrate \
+  --source-config /etc/sub2api/config.yaml \
+  --target-config /etc/LightBridge/config.yaml \
+  -v v0.0.1 \
+  -y
+```
+
+If the source and target database settings cannot be inferred from config files, pass DSNs explicitly:
+
+```bash
+sudo ./sub2api-full-migrate.sh migrate \
+  --source-dsn "host=127.0.0.1 port=5432 user=sub2api password=... dbname=sub2api sslmode=disable" \
+  --target-dsn "host=127.0.0.1 port=5432 user=LightBridge password=... dbname=LightBridge sslmode=disable" \
+  -v v0.0.1
+```
+
+Rollback:
+
+```bash
+sudo ./sub2api-full-migrate.sh rollback --backup-dir /opt/LightBridge-migration-backups/<timestamp>
 ```
 
 After migration, verify the service:

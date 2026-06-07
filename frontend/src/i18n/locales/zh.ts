@@ -363,6 +363,7 @@ export default {
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
     accounts: '账号管理',
+    modules: '模块市场',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -6682,6 +6683,45 @@ export default {
     installConfirmTitle: '确认安装版本',
     installConfirmMessage: '将覆盖式安装 {version}。是否继续？',
     dataSafeHint: '此操作只替换应用程序版本，不会删除或重置现有数据库、配置和用户数据。'
+  },
+
+  modules: {
+    title: '模块市场',
+    description: '独立安装、启用和维护 Provider 模块，主程序与模块包分开发布。',
+    refresh: '刷新',
+    installed: '已安装',
+    enabled: '已启用',
+    marketplace: '模块市场',
+    installedModules: '已安装模块',
+    installedDescription: '查看当前实例已安装的模块，管理权限、启用状态和卸载操作。',
+    marketplaceDescription: '从模块 registry 安装独立模块包，不随主版本自动打包下载。',
+    moduleCount: '{count} 个模块',
+    packageCount: '{count} 个包',
+    noInstalled: '暂无已安装模块',
+    noInstalledHint: '从模块市场安装 OpenAI Provider 或其他可用模块。',
+    noMarketplace: '暂无可用模块包',
+    noMarketplaceHint: '请检查模块 registry 地址或网络连接。',
+    versionValue: 'v{version}',
+    enabledAt: '启用时间：{time}',
+    signedPackage: '已签名',
+    approvePermissions: '批准权限',
+    enable: '启用',
+    disable: '停用',
+    uninstall: '卸载',
+    purge: '清除',
+    install: '安装',
+    operationFailed: '操作失败',
+    status: {
+      installed: '已安装',
+      enabled: '已启用',
+      disabled: '已停用',
+      failed: '失败',
+      uninstalled: '已卸载',
+      purged: '已清除'
+    },
+    type: {
+      provider: 'Provider'
+    }
   },
 
   // Recharge / Subscription Page

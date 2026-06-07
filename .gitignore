@@ -11,6 +11,7 @@ docs/claude-relay-service/
 *.so
 *.dylib
 backend/bin/
+backend/backend/
 backend/server
 backend/LightBridge
 backend/main

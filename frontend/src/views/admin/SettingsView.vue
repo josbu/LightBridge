@@ -7007,7 +7007,7 @@ const form = reactive<SettingsForm>({
   default_user_rpm_limit: 0,
   site_name: "LightBridge",
   site_logo: "",
-  site_subtitle: "Subscription to API Conversion Platform",
+  site_subtitle: "AI Gateway Control Plane",
   api_base_url: "",
   contact_info: "",
   doc_url: "",
@@ -9706,7 +9706,7 @@ watch(
   height: 2px;
   border-radius: 9999px;
   content: "";
-  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
+  background: linear-gradient(90deg, #e42313, #0ea5e9);
 }
 
 .settings-tab-icon {

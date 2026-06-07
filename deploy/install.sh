@@ -32,6 +32,9 @@ NC='\033[0m' # No Color
 
 # Configuration
 GITHUB_REPO="WilliamWang1721/LightBridge"
+MODULE_RELEASE_TAG="module-migration-20260606"
+MODULE_REGISTRY_URL="https://github.com/${GITHUB_REPO}/releases/download/${MODULE_RELEASE_TAG}/registry.json"
+MODULE_PUBLIC_KEY_URL="https://github.com/${GITHUB_REPO}/releases/download/${MODULE_RELEASE_TAG}/ed25519.pub"
 INSTALL_DIR="/opt/LightBridge"
 SERVICE_NAME="LightBridge"
 SERVICE_USER="LightBridge"
@@ -1117,6 +1120,54 @@ print_completion() {
     echo "=============================================="
 }
 
+
+configure_module_release() {
+    local config_file=""
+    local key_path="$INSTALL_DIR/data/modules/ed25519.pub"
+
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+        config_file="$CONFIG_DIR/config.yaml"
+    elif [ -f "$INSTALL_DIR/config.yaml" ]; then
+        config_file="$INSTALL_DIR/config.yaml"
+    fi
+
+    mkdir -p "$(dirname "$key_path")"
+    if curl -fsSL "$MODULE_PUBLIC_KEY_URL" -o "$key_path" 2>/dev/null; then
+        if id "$SERVICE_USER" &>/dev/null; then
+            chown "$SERVICE_USER:$SERVICE_USER" "$key_path" 2>/dev/null || true
+        fi
+    else
+        print_warning "Module signing public key could not be downloaded: $MODULE_PUBLIC_KEY_URL"
+    fi
+
+    if [ -z "$config_file" ]; then
+        config_file="$CONFIG_DIR/config.yaml"
+        mkdir -p "$CONFIG_DIR"
+        touch "$config_file"
+    fi
+
+    if grep -q '^modules:' "$config_file" 2>/dev/null; then
+        if ! grep -q 'marketplace_registry_url:' "$config_file"; then
+            sed -i '/^modules:/a\  marketplace_registry_url: "'"$MODULE_REGISTRY_URL"'"' "$config_file"
+        fi
+        if ! grep -q 'signature_public_key_path:' "$config_file"; then
+            sed -i '/^modules:/a\  signature_public_key_path: "'"$key_path"'"' "$config_file"
+        fi
+    else
+        cat >> "$config_file" << EOF
+
+modules:
+  marketplace_registry_url: "$MODULE_REGISTRY_URL"
+  signature_public_key_path: "$key_path"
+  marketplace_timeout_seconds: 20
+EOF
+    fi
+
+    if id "$SERVICE_USER" &>/dev/null; then
+        chown "$SERVICE_USER:$SERVICE_USER" "$config_file" 2>/dev/null || true
+    fi
+}
+
 # Upgrade function
 upgrade() {
     if ! detect_existing_install; then
@@ -1153,6 +1204,7 @@ upgrade() {
 
     # Set permissions
     set_installed_binary_owner "$ACTIVE_BINARY_PATH" "$backup_path" "$ACTIVE_SERVICE_USER"
+    configure_module_release
 
     # Start service
     print_info "$(msg 'starting_service')"
@@ -1220,6 +1272,7 @@ install_version() {
 
     # Set permissions
     set_installed_binary_owner "$ACTIVE_BINARY_PATH" "$backup_path" "$ACTIVE_SERVICE_USER"
+    configure_module_release
 
     # Start service
     print_info "$(msg 'starting_service')"

@@ -363,6 +363,7 @@ export default {
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
+    modules: 'Modules',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -5674,7 +5675,7 @@ export default {
         siteNamePlaceholder: 'LightBridge',
         siteNameHint: 'Displayed in emails and page titles',
         siteSubtitle: 'Site Subtitle',
-        siteSubtitlePlaceholder: 'Subscription to API Conversion Platform',
+        siteSubtitlePlaceholder: 'AI Gateway Control Plane',
         siteSubtitleHint: 'Displayed on login and register pages',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
@@ -6527,6 +6528,45 @@ export default {
     installConfirmTitle: 'Confirm Version Install',
     installConfirmMessage: 'Install {version} in place. Continue?',
     dataSafeHint: 'This operation only replaces the application version. It does not delete or reset the database, configuration, or user data.'
+  },
+
+  modules: {
+    title: 'Modules',
+    description: 'Install, enable, and maintain Provider modules independently from the LightBridge core release.',
+    refresh: 'Refresh',
+    installed: 'Installed',
+    enabled: 'Enabled',
+    marketplace: 'Marketplace',
+    installedModules: 'Installed Modules',
+    installedDescription: 'Review installed modules and manage permissions, runtime state, and removal.',
+    marketplaceDescription: 'Install standalone module packages from the module registry without bundling them into core releases.',
+    moduleCount: '{count} modules',
+    packageCount: '{count} packages',
+    noInstalled: 'No modules installed',
+    noInstalledHint: 'Install OpenAI Provider or another available module from the marketplace.',
+    noMarketplace: 'No marketplace packages',
+    noMarketplaceHint: 'Check the module registry URL or network connectivity.',
+    versionValue: 'v{version}',
+    enabledAt: 'Enabled at {time}',
+    signedPackage: 'Signed package',
+    approvePermissions: 'Approve permissions',
+    enable: 'Enable',
+    disable: 'Disable',
+    uninstall: 'Uninstall',
+    purge: 'Purge',
+    install: 'Install',
+    operationFailed: 'Operation failed',
+    status: {
+      installed: 'Installed',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      failed: 'Failed',
+      uninstalled: 'Uninstalled',
+      purged: 'Purged'
+    },
+    type: {
+      provider: 'Provider'
+    }
   },
 
   // Recharge / Subscription Page

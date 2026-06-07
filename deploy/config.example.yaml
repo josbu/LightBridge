@@ -995,6 +995,27 @@ pricing:
   hash_check_interval_minutes: 10
 
 # =============================================================================
+# Module Runtime
+# 模块运行时配置
+# =============================================================================
+modules:
+  # Directory used for installed module files and runtime sockets
+  # 模块安装文件与运行时 socket 的数据目录
+  data_dir: "./data"
+  # Ed25519 public key used to verify module package checksums.txt signatures
+  # 用于验证模块包 checksums.txt 签名的 Ed25519 公钥文件
+  signature_public_key_path: ""
+  # Marketplace registry published as a GitHub Release asset.
+  # 作为 GitHub Release 资产发布的模块市场索引。
+  marketplace_registry_url: "https://github.com/WilliamWang1721/LightBridge/releases/download/module-migration-20260606/registry.json"
+  # Optional local registry file. When set, it takes precedence over marketplace_registry_url.
+  # 可选本地索引文件；设置后优先于 marketplace_registry_url。
+  marketplace_registry_path: ""
+  # Timeout in seconds for fetching the registry and module packages.
+  # 拉取索引和模块包的超时时间（秒）。
+  marketplace_timeout_seconds: 20
+
+# =============================================================================
 # Billing Configuration
 # 计费配置
 # =============================================================================

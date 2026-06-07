@@ -1,0 +1,1 @@
+-- 0.1.0 stores module provider IDs in accounts.extra.provider_id for backward-compatible migrations.

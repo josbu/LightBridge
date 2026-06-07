@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/LightBridge/internal/pkg/errors"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/response"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/sysutil"
 	middleware2 "github.com/Wei-Shaw/LightBridge/internal/server/middleware"
@@ -57,6 +58,41 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	response.Success(c, info)
 }
 
+// ListVersionReleases returns installable application releases for the version control page.
+// GET /api/v1/admin/system/versions
+func (h *SystemHandler) ListVersionReleases(c *gin.Context) {
+	force := c.Query("force") == "true"
+	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("SYSTEM_VERSION_LIST_FAILED", "failed to list versions: "+err.Error()).WithCause(err))
+		return
+	}
+
+	releases := make([]gin.H, 0, 1)
+	if info.ReleaseInfo != nil && strings.TrimSpace(info.LatestVersion) != "" {
+		current := strings.TrimPrefix(strings.TrimSpace(info.CurrentVersion), "v")
+		latest := strings.TrimPrefix(strings.TrimSpace(info.LatestVersion), "v")
+		releases = append(releases, gin.H{
+			"version":      latest,
+			"name":         info.ReleaseInfo.Name,
+			"body":         info.ReleaseInfo.Body,
+			"published_at": info.ReleaseInfo.PublishedAt,
+			"html_url":     info.ReleaseInfo.HTMLURL,
+			"prerelease":   false,
+			"draft":        false,
+			"current":      current == latest,
+			"latest":       true,
+		})
+	}
+
+	response.Success(c, gin.H{
+		"current_version": info.CurrentVersion,
+		"latest_version":  info.LatestVersion,
+		"build_type":      info.BuildType,
+		"releases":        releases,
+	})
+}
+
 // PerformUpdate downloads and applies the update
 // POST /api/v1/admin/system/update
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
@@ -90,7 +126,7 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 				}, nil
 			}
 			releaseReason = "SYSTEM_UPDATE_FAILED"
-			return nil, err
+			return nil, infraerrors.InternalServer("SYSTEM_UPDATE_FAILED", "update failed: "+err.Error()).WithCause(err)
 		}
 		succeeded = true
 
@@ -120,7 +156,7 @@ func (h *SystemHandler) Rollback(c *gin.Context) {
 
 		if err := h.updateSvc.Rollback(); err != nil {
 			releaseReason = "SYSTEM_ROLLBACK_FAILED"
-			return nil, err
+			return nil, infraerrors.InternalServer("SYSTEM_ROLLBACK_FAILED", "rollback failed: "+err.Error()).WithCause(err)
 		}
 		succeeded = true
 

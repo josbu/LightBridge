@@ -40,7 +40,7 @@ Centered: Both horizontally and vertically
 ┌─────────────────────────────────────────────┐
 │                                             │
 │         🔷 LightBridge                          │
-│    Subscription to API Conversion Platform  │
+│            AI Gateway Control Plane         │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │
@@ -134,7 +134,7 @@ Centered: Both horizontally and vertically
 ┌─────────────────────────────────────────────┐
 │                                             │
 │         🔷 LightBridge                          │
-│    Subscription to API Conversion Platform  │
+│            AI Gateway Control Plane         │
 │                                             │
 │  ┌─────────────────────────────────────┐   │
 │  │                                     │   │

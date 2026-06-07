@@ -97,6 +97,8 @@ func RegisterAdminRoutes(
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
+
+		registerAdminModuleRoutes(admin, h)
 	}
 }
 
@@ -506,6 +508,7 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		system.GET("/version", h.Admin.System.GetVersion)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
+		system.GET("/versions", h.Admin.System.ListVersionReleases)
 		system.POST("/update", h.Admin.System.PerformUpdate)
 		system.POST("/rollback", h.Admin.System.Rollback)
 		system.POST("/restart", h.Admin.System.RestartService)
@@ -645,5 +648,23 @@ func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			users.PUT("/:user_id", h.Admin.Affiliate.UpdateUserSettings)
 			users.DELETE("/:user_id", h.Admin.Affiliate.ClearUserSettings)
 		}
+	}
+}
+
+func registerAdminModuleRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.Module == nil {
+		return
+	}
+	modules := admin.Group("/modules")
+	{
+		modules.GET("", h.Admin.Module.ListInstalled)
+		modules.GET("/marketplace", h.Admin.Module.Marketplace)
+		modules.POST("/marketplace/install", h.Admin.Module.InstallFromMarketplace)
+		modules.GET("/:id/permissions", h.Admin.Module.Permissions)
+		modules.POST("/:id/permissions/approve", h.Admin.Module.ApprovePermissions)
+		modules.POST("/:id/enable", h.Admin.Module.Enable)
+		modules.POST("/:id/disable", h.Admin.Module.Disable)
+		modules.POST("/:id/uninstall", h.Admin.Module.Uninstall)
+		modules.DELETE("/:id", h.Admin.Module.Purge)
 	}
 }

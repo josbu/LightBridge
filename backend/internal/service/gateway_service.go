@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/LightBridge/internal/config"
+	"github.com/Wei-Shaw/LightBridge/internal/modules"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/claude"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/logger"
@@ -619,6 +620,7 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	providerRegistry      *modules.ProviderRegistry
 }
 
 // NewGatewayService creates a new GatewayService
@@ -4397,6 +4399,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	startTime := time.Now()
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
+	}
+	if result, handled, err := s.forwardModuleProvider(ctx, c, account, parsed, startTime); handled {
+		return result, err
 	}
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应

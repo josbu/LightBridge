@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/LightBridge/internal/config"
+	"github.com/Wei-Shaw/LightBridge/internal/modules"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/claude"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/LightBridge/internal/pkg/openai"
@@ -70,6 +71,7 @@ type AccountTestService struct {
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
+	providerRegistry          *modules.ProviderRegistry
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -177,6 +179,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
+	}
+	if handled, err := s.testModuleProviderAccount(c, account, modelID, prompt, mode); handled {
+		return err
 	}
 
 	// Route to platform-specific test method

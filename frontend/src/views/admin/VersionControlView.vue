@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="space-y-6">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -225,12 +226,14 @@
       </div>
     </ConfirmDialog>
   </div>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import {
   listVersionReleases,
   performUpdate,

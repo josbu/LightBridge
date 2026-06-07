@@ -120,7 +120,7 @@ func TestSystemHandlerPerformUpdateAlreadyUpToDateReturnsOK(t *testing.T) {
 	require.NotEmpty(t, body.Data.OperationID)
 }
 
-func TestSystemHandlerPerformUpdateFailureStillReturnsInternalError(t *testing.T) {
+func TestSystemHandlerPerformUpdateFailureReturnsActionableError(t *testing.T) {
 	updateSvc := &systemHandlerUpdateServiceStub{
 		performErr: errors.New("download failed"),
 	}
@@ -140,5 +140,5 @@ func TestSystemHandlerPerformUpdateFailureStillReturnsInternalError(t *testing.T
 	var body systemUpdateErrorEnvelope
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, http.StatusInternalServerError, body.Code)
-	require.Equal(t, "internal error", body.Message)
+	require.Equal(t, "update failed: download failed", body.Message)
 }

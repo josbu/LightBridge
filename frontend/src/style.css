@@ -996,6 +996,9 @@
     background: var(--lb-bg-page) !important;
     border-right: 1px solid var(--lb-border) !important;
     box-shadow: none !important;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .sidebar-header {
@@ -1027,7 +1030,15 @@
 
   .sidebar-nav {
     padding: 0 32px 24px !important;
-    overflow: hidden;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-footer {
+    flex-shrink: 0;
   }
 
   .sidebar-section {
