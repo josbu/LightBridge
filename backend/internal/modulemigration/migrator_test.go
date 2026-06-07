@@ -89,3 +89,128 @@ func TestNormalizeCompatibleAccountPreservesLegacyProvider(t *testing.T) {
 		t.Fatalf("provider_id = %#v, want anthropic", migration["provider_id"])
 	}
 }
+
+func TestSub2APIProviderSpecificOAuthTypeDoesNotCollapseToGemini(t *testing.T) {
+	cases := []struct {
+		name         string
+		row          sourceRow
+		wantPlatform string
+		wantType     string
+		wantOpenAI   bool
+	}{
+		{
+			name: "claude oauth type infers anthropic oauth",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "claude-oauth",
+				"type":          "claude_oauth",
+				"refresh_token": "claude-rt",
+			},
+			wantPlatform: "anthropic",
+			wantType:     "oauth",
+		},
+		{
+			name: "anthropic oauth type infers anthropic oauth",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "anthropic-oauth",
+				"type":          "anthropic-oauth",
+				"access_token":  "anthropic-at",
+			},
+			wantPlatform: "anthropic",
+			wantType:     "oauth",
+		},
+		{
+			name: "antigravity oauth type infers antigravity oauth",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "antigravity-oauth",
+				"type":          "antigravity_oauth",
+				"refresh_token": "ag-rt",
+			},
+			wantPlatform: "antigravity",
+			wantType:     "oauth",
+		},
+		{
+			name: "gemini oauth type stays gemini oauth",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "gemini-oauth",
+				"type":          "gemini_oauth",
+				"refresh_token": "gemini-rt",
+			},
+			wantPlatform: "gemini",
+			wantType:     "oauth",
+		},
+		{
+			name: "openai oauth type goes to openai module",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "openai-oauth",
+				"type":          "openai_oauth",
+				"refresh_token": "openai-rt",
+			},
+			wantOpenAI: true,
+		},
+		{
+			name: "gemini api type becomes gemini apikey",
+			row: sourceRow{
+				"__source_kind": SourceSub2API,
+				"id":            "gemini-api",
+				"type":          "gemini",
+				"api_key":       "AIza-legacy",
+			},
+			wantPlatform: "gemini",
+			wantType:     "apikey",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record := accountFromRow(SourceSub2API, tc.row)
+			if got := isOpenAIAccount(record, tc.row); got != tc.wantOpenAI {
+				t.Fatalf("isOpenAIAccount() = %v, want %v", got, tc.wantOpenAI)
+			}
+			if tc.wantOpenAI {
+				normalizeOpenAIAccount(&record, tc.row)
+				if record.Platform != "module" {
+					t.Fatalf("Platform = %q, want module", record.Platform)
+				}
+				if record.Type != "oauth" {
+					t.Fatalf("Type = %q, want oauth", record.Type)
+				}
+				return
+			}
+			if ok := normalizeCompatibleAccount(&record, tc.row); !ok {
+				t.Fatal("normalizeCompatibleAccount() returned false")
+			}
+			if record.Platform != tc.wantPlatform {
+				t.Fatalf("Platform = %q, want %q", record.Platform, tc.wantPlatform)
+			}
+			if record.Type != tc.wantType {
+				t.Fatalf("Type = %q, want %q", record.Type, tc.wantType)
+			}
+			migration, ok := record.Extra["module_migration"].(map[string]any)
+			if !ok {
+				t.Fatalf("module_migration missing or wrong type: %#v", record.Extra["module_migration"])
+			}
+			if migration["provider_id"] != tc.wantPlatform {
+				t.Fatalf("provider_id = %#v, want %q", migration["provider_id"], tc.wantPlatform)
+			}
+		})
+	}
+}
+
+func TestNormalizeCompatibleAccountSkipsRowsWithoutProviderHint(t *testing.T) {
+	row := sourceRow{
+		"__source_kind": SourceSub2API,
+		"id":            "oauth-without-provider",
+		"type":          "oauth",
+		"refresh_token": "rt-without-provider",
+	}
+	record := accountFromRow(SourceSub2API, row)
+
+	if ok := normalizeCompatibleAccount(&record, row); ok {
+		t.Fatalf("normalizeCompatibleAccount() = true, want false; platform=%q type=%q", record.Platform, record.Type)
+	}
+}

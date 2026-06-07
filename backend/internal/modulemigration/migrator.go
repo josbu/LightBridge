@@ -511,9 +511,9 @@ func accountFromRow(sourceKind string, row sourceRow) accountRecord {
 		LegacyID:    legacyID(row),
 		Name:        defaultString(stringFromAny(first(row, "name", "label", "remark")), defaultAccountName(sourceKind, row)),
 		Notes:       stringFromAny(first(row, "notes", "note", "description")),
-		Platform:    strings.ToLower(stringFromAny(first(row, "platform", "provider"))),
-		ProviderID:  strings.ToLower(stringFromAny(first(row, "provider_id", "provider"))),
-		Type:        strings.ToLower(stringFromAny(first(row, "type", "auth_type"))),
+		Platform:    normalizeLegacyToken(strings.ToLower(stringFromAny(first(row, "platform", "provider")))),
+		ProviderID:  normalizeLegacyToken(strings.ToLower(stringFromAny(first(row, "provider_id", "provider")))),
+		Type:        normalizeAccountTypeString(strings.ToLower(stringFromAny(first(row, "auth_type", "account_type")))),
 		Credentials: credentials,
 		Extra:       extra,
 		ProxyID:     int64PtrFromAny(first(row, "proxy_id")),
@@ -529,9 +529,7 @@ func accountFromRow(sourceKind string, row sourceRow) accountRecord {
 func normalizeOpenAIAccount(record *accountRecord, row sourceRow) {
 	record.Platform = "module"
 	record.ProviderID = openAIProviderID
-	if record.Type == "api_key" {
-		record.Type = "apikey"
-	}
+	record.Type = normalizeAccountTypeString(record.Type)
 	if record.Type == "" {
 		record.Type = inferAccountType(record.Credentials, row)
 	}
@@ -565,9 +563,7 @@ func normalizeCompatibleAccount(record *accountRecord, row sourceRow) bool {
 	}
 	record.Platform = provider
 	record.ProviderID = provider
-	if record.Type == "api_key" {
-		record.Type = "apikey"
-	}
+	record.Type = normalizeAccountTypeString(record.Type)
 	if record.Type == "" {
 		record.Type = inferAccountType(record.Credentials, row)
 	}
@@ -609,33 +605,92 @@ func isOpenAIAccount(record accountRecord, row sourceRow) bool {
 }
 
 func normalizedProvider(row sourceRow, record accountRecord) (string, bool) {
-	raw := strings.ToLower(strings.TrimSpace(defaultString(
+	explicitRaw := strings.ToLower(strings.TrimSpace(defaultString(
 		stringFromAny(first(row, "provider_id", "provider", "platform", "service", "vendor")),
 		defaultString(record.ProviderID, record.Platform),
 	)))
+	if explicitRaw != "" {
+		if provider, ok := providerFromLegacyValue(explicitRaw); ok {
+			return provider, true
+		}
+		if normalizeAccountTypeString(explicitRaw) == "" {
+			return normalizeLegacyToken(explicitRaw), true
+		}
+	}
+	for _, raw := range []string{
+		stringFromAny(first(row, "type")),
+		stringFromAny(first(row, "auth_type", "account_type")),
+	} {
+		if provider, ok := providerFromLegacyValue(raw); ok {
+			return provider, true
+		}
+	}
+	return "", false
+}
+
+func providerFromLegacyValue(value string) (string, bool) {
+	raw := normalizeLegacyToken(value)
 	if raw == "" {
 		return "", false
 	}
-	raw = strings.ReplaceAll(raw, "-", "_")
 	switch raw {
 	case "openai", "chatgpt", "codex":
 		return openAIProviderID, true
-	case "anthropic", "claude", "claude_code":
+	case "openai_oauth", "chatgpt_oauth", "codex_oauth":
+		return openAIProviderID, true
+	case "anthropic", "claude", "claude_code", "anthropic_oauth", "claude_oauth", "claude_code_oauth":
 		return "anthropic", true
-	case "google", "gemini", "ai_studio", "code_assist":
+	case "google", "gemini", "ai_studio", "code_assist", "google_oauth", "gemini_oauth", "ai_studio_oauth", "code_assist_oauth":
 		return "gemini", true
-	case "antigravity":
+	case "antigravity", "antigravity_oauth":
 		return "antigravity", true
 	default:
-		return raw, true
+		return "", false
 	}
 }
 
 func inferAccountType(credentials map[string]any, row sourceRow) string {
+	for _, value := range []string{
+		stringFromAny(first(row, "auth_type", "account_type")),
+		stringFromAny(first(row, "type")),
+		stringFromAny(credentials["auth_type"]),
+		stringFromAny(credentials["type"]),
+	} {
+		if accountType := normalizeAccountTypeString(value); accountType != "" {
+			return accountType
+		}
+	}
 	if stringFromAny(first(row, "refresh_token", "rt")) != "" || stringFromAny(credentials["refresh_token"]) != "" || stringFromAny(credentials["access_token"]) != "" {
 		return "oauth"
 	}
 	return "apikey"
+}
+
+func normalizeLegacyToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	return strings.Trim(value, "_")
+}
+
+func normalizeAccountTypeString(value string) string {
+	raw := normalizeLegacyToken(value)
+	switch raw {
+	case "apikey", "api_key", "key", "token", "pat":
+		return "apikey"
+	case "oauth", "oauth2", "oauth_token", "openai_oauth", "anthropic_oauth", "claude_oauth", "gemini_oauth", "google_oauth", "ai_studio_oauth", "code_assist_oauth", "antigravity_oauth":
+		return "oauth"
+	case "setup_token", "setup":
+		return "setup-token"
+	case "bedrock":
+		return "bedrock"
+	case "service_account", "google_service_account", "vertex_service_account":
+		return "service_account"
+	case "upstream":
+		return "upstream"
+	default:
+		return ""
+	}
 }
 
 func defaultAccountName(sourceKind string, row sourceRow) string {
