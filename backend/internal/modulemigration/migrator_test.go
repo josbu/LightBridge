@@ -1,7 +1,11 @@
 package modulemigration
 
 import (
+	"context"
+	"regexp"
 	"testing"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestSub2APIOpenAIAccountDetectionHonorsExplicitProvider(t *testing.T) {
@@ -212,5 +216,104 @@ func TestNormalizeCompatibleAccountSkipsRowsWithoutProviderHint(t *testing.T) {
 
 	if ok := normalizeCompatibleAccount(&record, row); ok {
 		t.Fatalf("normalizeCompatibleAccount() = true, want false; platform=%q type=%q", record.Platform, record.Type)
+	}
+}
+
+func TestSourceRowDeleted(t *testing.T) {
+	cases := []struct {
+		name string
+		row  sourceRow
+		want bool
+	}{
+		{name: "missing deleted_at is active", row: sourceRow{}, want: false},
+		{name: "nil deleted_at is active", row: sourceRow{"deleted_at": nil}, want: false},
+		{name: "empty string deleted_at is active", row: sourceRow{"deleted_at": " "}, want: false},
+		{name: "timestamp string deleted_at is deleted", row: sourceRow{"deleted_at": "2026-06-08T00:00:00Z"}, want: true},
+		{name: "timestamp bytes deleted_at is deleted", row: sourceRow{"deleted_at": []byte("2026-06-08T00:00:00Z")}, want: true},
+		{name: "time value deleted_at is deleted", row: sourceRow{"deleted_at": 1}, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sourceRowDeleted(tc.row); got != tc.want {
+				t.Fatalf("sourceRowDeleted() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSkipDeletedCompatibleAccountDetectsGeminiOAuthTombstone(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New(): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	m := &Migrator{
+		target: db,
+		opts: Options{
+			SourceKind: SourceSub2API,
+		},
+	}
+	record := accountRecord{
+		LegacyID: "gemini-oauth-42",
+		Platform: "gemini",
+		Type:     "oauth",
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT COUNT(*) FROM accounts
+WHERE platform = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NOT NULL`)).
+		WithArgs("gemini", SourceSub2API, "gemini-oauth-42").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	skip, err := m.skipDeletedCompatibleAccount(context.Background(), record)
+	if err != nil {
+		t.Fatalf("skipDeletedCompatibleAccount() error = %v", err)
+	}
+	if !skip {
+		t.Fatal("skipDeletedCompatibleAccount() = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSkipDeletedOpenAIAccountDetectsModuleTombstone(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New(): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	m := &Migrator{
+		target: db,
+		opts: Options{
+			SourceKind: SourceLightBridge,
+		},
+	}
+	record := accountRecord{LegacyID: "7"}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT COUNT(*) FROM accounts
+WHERE extra->>'provider_id' = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NOT NULL`)).
+		WithArgs(openAIProviderID, SourceLightBridge, "7").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	skip, err := m.skipDeletedOpenAIAccount(context.Background(), record)
+	if err != nil {
+		t.Fatalf("skipDeletedOpenAIAccount() error = %v", err)
+	}
+	if !skip {
+		t.Fatal("skipDeletedOpenAIAccount() = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

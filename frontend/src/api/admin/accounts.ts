@@ -15,6 +15,7 @@ import type {
   AccountUsageStatsResponse,
   TempUnschedulableStatus,
   AdminDataPayload,
+  AdminDataImportPayload,
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
@@ -580,12 +581,25 @@ export async function exportData(options?: {
 }
 
 export async function importData(payload: {
-  data: AdminDataPayload
+  data?: AdminDataImportPayload
+  source_url?: string
   skip_default_group_bind?: boolean
+  compatibility_mode?: boolean
+  group_ids?: number[]
+  account_defaults?: {
+    concurrency?: number
+    priority?: number
+    rate_multiplier?: number
+    auto_pause_on_expired?: boolean
+  }
 }): Promise<AdminDataImportResult> {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
-    skip_default_group_bind: payload.skip_default_group_bind
+    source_url: payload.source_url,
+    skip_default_group_bind: payload.skip_default_group_bind,
+    compatibility_mode: payload.compatibility_mode,
+    group_ids: payload.group_ids,
+    account_defaults: payload.account_defaults
   })
   return data
 }

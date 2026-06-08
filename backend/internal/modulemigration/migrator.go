@@ -215,6 +215,10 @@ func (m *Migrator) migrateAccounts(ctx context.Context, proxyMap map[int64]int64
 	}
 	for _, row := range rows {
 		report.AccountsScanned++
+		if sourceRowDeleted(row) {
+			report.AccountsSkipped++
+			continue
+		}
 		row["__source_kind"] = m.opts.SourceKind
 		record := accountFromRow(m.opts.SourceKind, row)
 		if isOpenAIAccount(record, row) {
@@ -227,6 +231,12 @@ func (m *Migrator) migrateAccounts(ctx context.Context, proxyMap map[int64]int64
 			if m.opts.DryRun {
 				report.AccountsMigrated++
 				report.OpenAIAccountsMigrated++
+				continue
+			}
+			if skipped, err := m.skipDeletedOpenAIAccount(ctx, record); err != nil {
+				return fmt.Errorf("check deleted openai account %s: %w", record.LegacyID, err)
+			} else if skipped {
+				report.AccountsSkipped++
 				continue
 			}
 			if err := m.upsertOpenAIAccount(ctx, record); err != nil {
@@ -253,6 +263,12 @@ func (m *Migrator) migrateAccounts(ctx context.Context, proxyMap map[int64]int64
 		if m.opts.DryRun {
 			report.AccountsMigrated++
 			report.CompatibleAccountsMigrated++
+			continue
+		}
+		if skipped, err := m.skipDeletedCompatibleAccount(ctx, record); err != nil {
+			return fmt.Errorf("check deleted compatible account %s: %w", record.LegacyID, err)
+		} else if skipped {
+			report.AccountsSkipped++
 			continue
 		}
 		if err := m.upsertCompatibleAccount(ctx, record); err != nil {
@@ -389,6 +405,16 @@ INSERT INTO accounts (
 	return err
 }
 
+func (m *Migrator) skipDeletedOpenAIAccount(ctx context.Context, record accountRecord) (bool, error) {
+	legacyID := strings.TrimSpace(stringFromAny(record.LegacyID))
+	return m.hasDeletedMigrationAccount(ctx, `
+SELECT COUNT(*) FROM accounts
+WHERE extra->>'provider_id' = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NOT NULL`, openAIProviderID, m.opts.SourceKind, legacyID)
+}
+
 func (m *Migrator) upsertCompatibleAccount(ctx context.Context, record accountRecord) error {
 	credentials, err := json.Marshal(record.Credentials)
 	if err != nil {
@@ -433,6 +459,25 @@ INSERT INTO accounts (
 		record.Name, record.Notes, record.Platform, record.Type, string(credentials), string(extra), record.ProxyID,
 		record.Concurrency, record.LoadFactor, record.Priority, record.Status, record.Schedulable)
 	return err
+}
+
+func (m *Migrator) skipDeletedCompatibleAccount(ctx context.Context, record accountRecord) (bool, error) {
+	legacyID := strings.TrimSpace(stringFromAny(record.LegacyID))
+	return m.hasDeletedMigrationAccount(ctx, `
+SELECT COUNT(*) FROM accounts
+WHERE platform = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NOT NULL`, record.Platform, m.opts.SourceKind, legacyID)
+}
+
+func (m *Migrator) hasDeletedMigrationAccount(ctx context.Context, query string, args ...any) (bool, error) {
+	var count int
+	err := m.target.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (m *Migrator) tableExists(ctx context.Context, db *sql.DB, tableName string) bool {
@@ -843,6 +888,21 @@ func boolFromAny(value any, fallback bool) bool {
 		return v != 0
 	}
 	return fallback
+}
+
+func sourceRowDeleted(row sourceRow) bool {
+	value, ok := row["deleted_at"]
+	if !ok || value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []byte:
+		return strings.TrimSpace(string(v)) != ""
+	default:
+		return true
+	}
 }
 
 func defaultString(value string, fallback string) string {

@@ -1,9 +1,16 @@
 package admin
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -18,10 +25,14 @@ import (
 )
 
 const (
-	dataType       = "LightBridge-data"
-	legacyDataType = "LightBridge-bundle"
-	dataVersion    = 1
-	dataPageCap    = 1000
+	dataType                  = "LightBridge-data"
+	legacyDataType            = "LightBridge-bundle"
+	dataVersion               = 1
+	dataPageCap               = 1000
+	dataImportRemoteMaxBytes  = 20 << 20
+	dataImportHTTPTimeout     = 30 * time.Second
+	dataImportZipMaxFiles     = 200
+	dataImportZipMaxFileBytes = 10 << 20
 )
 
 type DataPayload struct {
@@ -62,8 +73,19 @@ type DataAccount struct {
 }
 
 type DataImportRequest struct {
-	Data                 DataPayload `json:"data"`
-	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	Data                 json.RawMessage      `json:"data"`
+	SourceURL            string               `json:"source_url"`
+	SkipDefaultGroupBind *bool                `json:"skip_default_group_bind"`
+	CompatibilityMode    *bool                `json:"compatibility_mode"`
+	GroupIDs             []int64              `json:"group_ids"`
+	AccountDefaults      *DataAccountDefaults `json:"account_defaults"`
+}
+
+type DataAccountDefaults struct {
+	Concurrency        *int     `json:"concurrency"`
+	Priority           *int     `json:"priority"`
+	RateMultiplier     *float64 `json:"rate_multiplier"`
+	AutoPauseOnExpired *bool    `json:"auto_pause_on_expired"`
 }
 
 type DataImportResult struct {
@@ -182,23 +204,192 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 		return
 	}
 
-	if err := validateDataHeader(req.Data); err != nil {
+	if err := validateDataImportOptions(req); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	sourceURL := strings.TrimSpace(req.SourceURL)
+	useCompatibilityMode := req.CompatibilityMode != nil && *req.CompatibilityMode
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return h.importData(ctx, req)
+		dataPayloads, err := h.resolveImportDataPayloads(ctx, req.Data, sourceURL, useCompatibilityMode)
+		if err != nil {
+			return nil, err
+		}
+		return h.importDataPayloads(ctx, dataPayloads, req.SkipDefaultGroupBind, req.GroupIDs, req.AccountDefaults)
 	})
 }
 
-func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) (DataImportResult, error) {
-	skipDefaultGroupBind := true
-	if req.SkipDefaultGroupBind != nil {
-		skipDefaultGroupBind = *req.SkipDefaultGroupBind
+func (h *AccountHandler) resolveImportDataPayloads(ctx context.Context, raw json.RawMessage, sourceURL string, compatibilityMode bool) ([]DataPayload, error) {
+	if sourceURL != "" {
+		downloaded, filename, err := downloadImportSourceURL(ctx, sourceURL)
+		if err != nil {
+			return nil, infraerrors.ServiceUnavailable("DATA_IMPORT_SOURCE_DOWNLOAD_FAILED", "download import source failed").WithCause(err)
+		}
+		return normalizeImportFileData(downloaded, filename, compatibilityMode)
+	}
+	payload, err := normalizeSingleImportDataPayload(raw, compatibilityMode)
+	if err != nil {
+		return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID", err.Error()).WithCause(err)
+	}
+	return []DataPayload{payload}, nil
+}
+
+func normalizeSingleImportDataPayload(raw json.RawMessage, compatibilityMode bool) (DataPayload, error) {
+	dataPayload, err := normalizeImportDataPayload(raw)
+	if err != nil && compatibilityMode {
+		dataPayload, err = normalizeCompatibilityImportPayload(raw)
+	}
+	return dataPayload, err
+}
+
+func (h *AccountHandler) importDataPayloads(ctx context.Context, dataPayloads []DataPayload, skipDefaultGroupBindRaw *bool, groupIDs []int64, accountDefaults *DataAccountDefaults) (DataImportResult, error) {
+	if len(dataPayloads) == 0 {
+		return DataImportResult{}, errors.New("data is required")
+	}
+	merged := DataImportResult{}
+	for _, dataPayload := range dataPayloads {
+		result, err := h.importData(ctx, dataPayload, skipDefaultGroupBindRaw, groupIDs, accountDefaults)
+		if err != nil {
+			return merged, err
+		}
+		mergeDataImportResult(&merged, result)
+	}
+	return merged, nil
+}
+
+func mergeDataImportResult(target *DataImportResult, source DataImportResult) {
+	target.ProxyCreated += source.ProxyCreated
+	target.ProxyReused += source.ProxyReused
+	target.ProxyFailed += source.ProxyFailed
+	target.AccountCreated += source.AccountCreated
+	target.AccountFailed += source.AccountFailed
+	target.Errors = append(target.Errors, source.Errors...)
+}
+
+func downloadImportSourceURL(ctx context.Context, rawURL string) ([]byte, string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, "", errors.New("source_url must be a valid http or https URL")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, "", errors.New("source_url is invalid")
+	}
+	req.Header.Set("Accept", "application/json,text/plain,application/zip,application/octet-stream,*/*")
+
+	client := &http.Client{Timeout: dataImportHTTPTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("download source_url failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("download source_url returned %s", resp.Status)
+	}
+	if resp.ContentLength > dataImportRemoteMaxBytes {
+		return nil, "", fmt.Errorf("download source_url exceeds %d bytes", dataImportRemoteMaxBytes)
 	}
 
-	dataPayload := req.Data
+	limited := io.LimitReader(resp.Body, dataImportRemoteMaxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, "", fmt.Errorf("read source_url response failed: %w", err)
+	}
+	if len(data) > dataImportRemoteMaxBytes {
+		return nil, "", fmt.Errorf("download source_url exceeds %d bytes", dataImportRemoteMaxBytes)
+	}
+
+	filename := path.Base(parsed.Path)
+	if filename == "." || filename == "/" {
+		filename = ""
+	}
+	return data, filename, nil
+}
+
+func normalizeImportFileData(data []byte, filename string, compatibilityMode bool) ([]DataPayload, error) {
+	if len(data) == 0 {
+		err := errors.New("downloaded import file is empty")
+		return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID", err.Error()).WithCause(err)
+	}
+	if isZipImportFile(data, filename) {
+		return normalizeImportZipData(data, compatibilityMode)
+	}
+	payload, err := normalizeSingleImportDataPayload(json.RawMessage(data), compatibilityMode)
+	if err != nil {
+		return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID", err.Error()).WithCause(err)
+	}
+	return []DataPayload{payload}, nil
+}
+
+func normalizeImportZipData(data []byte, compatibilityMode bool) ([]DataPayload, error) {
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", "Invalid ZIP file").WithCause(err)
+	}
+
+	payloads := make([]DataPayload, 0)
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() || !isImportableDataFilename(file.Name) {
+			continue
+		}
+		if len(payloads) >= dataImportZipMaxFiles {
+			err := fmt.Errorf("ZIP contains more than %d importable files", dataImportZipMaxFiles)
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", err.Error()).WithCause(err)
+		}
+		if file.UncompressedSize64 > dataImportZipMaxFileBytes {
+			err := fmt.Errorf("ZIP entry %s exceeds %d bytes", file.Name, dataImportZipMaxFileBytes)
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", err.Error()).WithCause(err)
+		}
+
+		rc, err := file.Open()
+		if err != nil {
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", fmt.Sprintf("open ZIP entry %s failed", file.Name)).WithCause(err)
+		}
+		content, readErr := io.ReadAll(io.LimitReader(rc, dataImportZipMaxFileBytes+1))
+		closeErr := rc.Close()
+		if readErr != nil {
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", fmt.Sprintf("read ZIP entry %s failed", file.Name)).WithCause(readErr)
+		}
+		if closeErr != nil {
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", fmt.Sprintf("close ZIP entry %s failed", file.Name)).WithCause(closeErr)
+		}
+		if len(content) > dataImportZipMaxFileBytes {
+			err := fmt.Errorf("ZIP entry %s exceeds %d bytes", file.Name, dataImportZipMaxFileBytes)
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", err.Error()).WithCause(err)
+		}
+
+		payload, err := normalizeSingleImportDataPayload(json.RawMessage(content), compatibilityMode)
+		if err != nil {
+			return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", fmt.Sprintf("ZIP entry %s: %s", file.Name, err.Error())).WithCause(err)
+		}
+		payloads = append(payloads, payload)
+	}
+	if len(payloads) == 0 {
+		err := errors.New("ZIP contains no importable JSON/TXT files")
+		return nil, infraerrors.BadRequest("DATA_IMPORT_INVALID_ZIP", err.Error()).WithCause(err)
+	}
+	return payloads, nil
+}
+
+func isZipImportFile(data []byte, filename string) bool {
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(filename)), ".zip") {
+		return true
+	}
+	return len(data) >= 4 && bytes.Equal(data[:4], []byte{'P', 'K', 0x03, 0x04})
+}
+
+func isImportableDataFilename(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasSuffix(normalized, ".json") || strings.HasSuffix(normalized, ".txt")
+}
+
+func (h *AccountHandler) importData(ctx context.Context, dataPayload DataPayload, skipDefaultGroupBindRaw *bool, groupIDs []int64, accountDefaults *DataAccountDefaults) (DataImportResult, error) {
+	skipDefaultGroupBind := true
+	if skipDefaultGroupBindRaw != nil {
+		skipDefaultGroupBind = *skipDefaultGroupBindRaw
+	}
+
 	result := DataImportResult{}
 
 	existingProxies, err := h.listAllProxies(ctx)
@@ -276,6 +467,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
+		applyDataAccountDefaults(&item, accountDefaults)
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -315,7 +507,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Concurrency:          item.Concurrency,
 			Priority:             item.Priority,
 			RateMultiplier:       item.RateMultiplier,
-			GroupIDs:             nil,
+			GroupIDs:             groupIDs,
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
@@ -525,6 +717,27 @@ func validateDataHeader(payload DataPayload) error {
 	return nil
 }
 
+func validateDataImportOptions(req DataImportRequest) error {
+	for _, id := range req.GroupIDs {
+		if id <= 0 {
+			return fmt.Errorf("group_id is invalid: %d", id)
+		}
+	}
+	if req.AccountDefaults == nil {
+		return nil
+	}
+	if req.AccountDefaults.Concurrency != nil && *req.AccountDefaults.Concurrency < 0 {
+		return errors.New("default concurrency must be >= 0")
+	}
+	if req.AccountDefaults.Priority != nil && *req.AccountDefaults.Priority < 0 {
+		return errors.New("default priority must be >= 0")
+	}
+	if req.AccountDefaults.RateMultiplier != nil && *req.AccountDefaults.RateMultiplier < 0 {
+		return errors.New("default rate_multiplier must be >= 0")
+	}
+	return nil
+}
+
 func validateDataProxy(item DataProxy) error {
 	if strings.TrimSpace(item.Protocol) == "" {
 		return errors.New("proxy protocol is required")
@@ -577,6 +790,24 @@ func validateDataAccount(item DataAccount) error {
 		return errors.New("priority must be >= 0")
 	}
 	return nil
+}
+
+func applyDataAccountDefaults(item *DataAccount, defaults *DataAccountDefaults) {
+	if item == nil || defaults == nil {
+		return
+	}
+	if defaults.Concurrency != nil {
+		item.Concurrency = *defaults.Concurrency
+	}
+	if defaults.Priority != nil {
+		item.Priority = *defaults.Priority
+	}
+	if defaults.RateMultiplier != nil {
+		item.RateMultiplier = defaults.RateMultiplier
+	}
+	if defaults.AutoPauseOnExpired != nil {
+		item.AutoPauseOnExpired = defaults.AutoPauseOnExpired
+	}
 }
 
 func defaultProxyName(name string) string {
