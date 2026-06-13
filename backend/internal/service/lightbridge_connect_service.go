@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -149,12 +150,15 @@ func (s *LightBridgeConnectService) VerifyNewAPIToken(ctx context.Context, insta
 		Timeout: 10 * time.Second,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", instanceURL+"/api/user/self", nil)
+	// Normalize URL: strip trailing slashes
+	baseURL := strings.TrimRight(instanceURL, "/")
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/user/self", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
@@ -163,13 +167,26 @@ func (s *LightBridgeConnectService) VerifyNewAPIToken(ctx context.Context, insta
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("invalid token or unauthorized, status: %d", resp.StatusCode)
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return nil, fmt.Errorf("request failed, status: %d, body: %s", resp.StatusCode, preview)
 	}
 
 	var result NewAPIUserResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.Unmarshal(body, &result); err != nil {
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		return nil, fmt.Errorf("failed to parse response (not JSON): %s", preview)
 	}
 
 	if !result.Success {
