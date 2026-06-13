@@ -98,6 +98,7 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
+	lightBridgeConnectSync *service.LightBridgeConnectSyncService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -245,6 +246,12 @@ func provideCleanup(
 			{"UserPlatformQuotaUsageFlusher", func() error {
 				if quotaFlusher != nil {
 					quotaFlusher.Stop()
+				}
+				return nil
+			}},
+			{"LightBridgeConnectSyncService", func() error {
+				if lightBridgeConnectSync != nil {
+					lightBridgeConnectSync.Stop()
 				}
 				return nil
 			}},
