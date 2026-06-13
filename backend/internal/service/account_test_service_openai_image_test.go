@@ -73,12 +73,15 @@ func TestAccountTestService_OpenAIImageAPIKeyUsesConfiguredV1BaseURL(t *testing.
 	}
 	account := &Account{
 		ID:       54,
-		Name:     "openai-apikey",
-		Platform: PlatformOpenAI,
+		Name:     "custom-openai-image",
+		Platform: PlatformCustom,
 		Type:     AccountTypeAPIKey,
 		Credentials: map[string]any{
 			"api_key":  "test-api-key",
 			"base_url": "https://image-upstream.example/v1",
+		},
+		Extra: map[string]any{
+			"protocol": CustomProtocolOpenAIChatCompletions, // Images 需要 chat/completions 相关的协议
 		},
 	}
 

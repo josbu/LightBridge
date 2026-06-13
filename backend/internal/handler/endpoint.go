@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"strings"
 
+	"github.com/Wei-Shaw/LightBridge/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/LightBridge/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -140,8 +142,35 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 		if path == "" && c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
 		}
-		c.Set(ctxKeyInboundEndpoint, NormalizeInboundEndpoint(path))
+		inbound := NormalizeInboundEndpoint(path)
+		c.Set(ctxKeyInboundEndpoint, inbound)
+		// 注入请求级「所需上游协议」，供 Service 层对 Custom 账号做调度过滤。
+		if proto := RequiredProtocolForInboundEndpoint(inbound); proto != "" && c.Request != nil {
+			c.Request = c.Request.WithContext(
+				context.WithValue(c.Request.Context(), ctxkey.RequiredProtocol, proto),
+			)
+		}
 		c.Next()
+	}
+}
+
+// RequiredProtocolForInboundEndpoint 将规范化的入站 endpoint 映射为「所需上游协议」
+// （见 service.CustomProtocol* 常量）。Custom 账号仅当其 protocol 与之一致时可服务该请求。
+// 无对应协议的 endpoint（如 images）返回空串。
+func RequiredProtocolForInboundEndpoint(inbound string) string {
+	switch inbound {
+	case EndpointMessages:
+		return service.CustomProtocolAnthropicMessages
+	case EndpointResponses:
+		return service.CustomProtocolOpenAIResponses
+	case EndpointChatCompletions:
+		return service.CustomProtocolOpenAIChatCompletions
+	case EndpointEmbeddings:
+		return service.CustomProtocolOpenAIEmbeddings
+	case EndpointGeminiModels:
+		return service.CustomProtocolGemini
+	default:
+		return ""
 	}
 }
 

@@ -41,6 +41,16 @@ const (
 	PlatformOpenAI      = domain.PlatformOpenAI
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
+	PlatformCustom      = domain.PlatformCustom
+)
+
+// Custom protocol constants（accounts.extra["protocol"] 取值）。
+const (
+	CustomProtocolOpenAIResponses       = domain.CustomProtocolOpenAIResponses
+	CustomProtocolOpenAIChatCompletions = domain.CustomProtocolOpenAIChatCompletions
+	CustomProtocolOpenAIEmbeddings      = domain.CustomProtocolOpenAIEmbeddings
+	CustomProtocolAnthropicMessages     = domain.CustomProtocolAnthropicMessages
+	CustomProtocolGemini                = domain.CustomProtocolGemini
 )
 
 // Sub-platform constants（accounts.sub_platform 取值）。
@@ -63,6 +73,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformOpenAI,
 	PlatformGemini,
 	PlatformAntigravity,
+	PlatformCustom,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。

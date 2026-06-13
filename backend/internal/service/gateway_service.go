@@ -2287,6 +2287,9 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	if s.schedulerSnapshot != nil {
 		accounts, useMixed, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		if err == nil {
+			// 请求级 Custom 协议过滤（快照按 group/platform 缓存、跨入站 endpoint 共享，
+			// 故协议过滤必须在此处按当前请求做）。
+			accounts = filterAccountsByRequestProtocol(ctx, accounts)
 			slog.Debug("account_scheduling_list_snapshot",
 				"group_id", derefGroupID(groupID),
 				"platform", platform,
@@ -2344,6 +2347,8 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			filtered = append(filtered, accounts[i])
 		}
 	}
+	// 请求级 Custom 协议过滤（按当前入站 endpoint 推导的 requiredProtocol）。
+	filtered = filterAccountsByRequestProtocol(ctx, filtered)
 	slog.Debug("account_scheduling_list",
 		"group_id", derefGroupID(groupID),
 		"platform", platform,
@@ -3319,7 +3324,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
 						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
-							if accountServesSchedulingPlatform(account, nativePlatform, true) {
+							if accountServesSchedulingPlatform(account, nativePlatform, true) && accountMatchesRequestProtocol(ctx, account) {
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 								}
@@ -3440,7 +3445,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
 					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
-						if accountServesSchedulingPlatform(account, nativePlatform, true) {
+						if accountServesSchedulingPlatform(account, nativePlatform, true) && accountMatchesRequestProtocol(ctx, account) {
 							return account, nil
 						}
 					}

@@ -33,6 +33,13 @@ type Options struct {
 	DryRun                    bool
 	InstallOpenAIModule       bool
 	EnableOpenAIModule        bool
+	// SameDatabase indicates that the source and target point at the same
+	// database (the in-place upgrade auto-migration). When true, legacy OpenAI
+	// accounts are converted in place instead of being copied into a new
+	// `platform='module'` row — otherwise the original `platform='openai'` row
+	// would be left behind as a duplicate and would re-trigger the migration on
+	// every startup.
+	SameDatabase bool
 }
 
 type Report struct {
@@ -123,6 +130,12 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.ModuleDataDir == "" {
 		opts.ModuleDataDir = "data"
+	}
+	// Treat identical source/target as the same database so OpenAI accounts are
+	// converted in place rather than duplicated into a parallel module account.
+	if !opts.SameDatabase && opts.SourceDriver == opts.TargetDriver &&
+		opts.SourceDSN != "" && opts.SourceDSN == opts.TargetDSN {
+		opts.SameDatabase = true
 	}
 	return opts
 }
@@ -391,6 +404,37 @@ WHERE id = $12`,
 			record.Concurrency, record.LoadFactor, record.Priority, record.Status, record.Schedulable, existingID)
 		return err
 	}
+
+	// Same-database (in-place upgrade) migration: convert the legacy
+	// `platform='openai'` account in place instead of inserting a second
+	// `platform='module'` row. Inserting a copy would (a) leave the original
+	// openai account behind as a duplicate, and (b) keep hasLegacyOpenAIAccounts
+	// true, re-running this migration — and re-adding the copy — on every boot.
+	// Converting in place also preserves the account id so API keys, groups and
+	// usage records keep pointing at the same account.
+	if m.opts.SameDatabase {
+		if sourceID, ok := numericLegacyID(record.LegacyID); ok {
+			_, err := m.target.ExecContext(ctx, `
+UPDATE accounts
+SET name = $1, notes = NULLIF($2, ''), platform = 'module', type = $3,
+    credentials = $4, extra = $5, proxy_id = COALESCE($6, proxy_id), concurrency = $7, load_factor = $8,
+    priority = $9, status = $10, schedulable = $11, updated_at = NOW()
+WHERE id = $12 AND platform = 'openai' AND deleted_at IS NULL`,
+				record.Name, record.Notes, record.Type, string(credentials), string(extra), record.ProxyID,
+				record.Concurrency, record.LoadFactor, record.Priority, record.Status, record.Schedulable, sourceID)
+			if err != nil {
+				return err
+			}
+			// 0 rows affected means the source row is no longer a live
+			// openai account (already converted, deleted, or remapped); skip
+			// rather than insert a duplicate.
+			return nil
+		}
+		// LegacyID is not the numeric account id (cannot safely convert in
+		// place); skip to avoid creating a duplicate.
+		return nil
+	}
+
 	_, err = m.target.ExecContext(ctx, `
 INSERT INTO accounts (
   name, notes, platform, type, credentials, extra, proxy_id,
@@ -478,6 +522,18 @@ func (m *Migrator) hasDeletedMigrationAccount(ctx context.Context, query string,
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func numericLegacyID(legacyID string) (int64, bool) {
+	trimmed := strings.TrimSpace(legacyID)
+	if trimmed == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func (m *Migrator) tableExists(ctx context.Context, db *sql.DB, tableName string) bool {

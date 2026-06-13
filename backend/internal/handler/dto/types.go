@@ -156,6 +156,7 @@ type Account struct {
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
 	Platform string  `json:"platform"`
+	Protocol string  `json:"protocol,omitempty"` // Custom 账户的协议类型
 	Type     string  `json:"type"`
 	// Credentials 经 RedactCredentials 处理后只含非敏感子键；敏感 token / api_key / 私钥
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。

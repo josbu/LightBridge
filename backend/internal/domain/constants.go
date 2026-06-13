@@ -28,6 +28,22 @@ const (
 	//   2. 向后兼容的“平台别名”——分组 platform、强制平台中间件、API 入参、
 	//      配额归因等仍可使用 "antigravity"，由归一化逻辑映射到 gemini+sub_platform。
 	PlatformAntigravity = "antigravity"
+
+	// PlatformCustom 是「自定义 Provider」平台。Custom 账号通过自定义 Base URL +
+	// API Key 连接任意上游，并显式选择上游协议（见 CustomProtocol* 常量）。
+	// Custom 账号不受分组类型限制：可加入任意分组，按其 protocol 与请求的入站协议
+	// 匹配来决定是否参与该请求调度；转发时复用对应原生协议的转发栈。
+	PlatformCustom = "custom"
+)
+
+// Custom protocol constants —— Custom 账号选择的上游协议（存于 accounts.extra["protocol"]）。
+// 每个协议对应一个原生转发栈与入站 endpoint。
+const (
+	CustomProtocolOpenAIResponses       = "openai_responses"        // OpenAI Responses API (/v1/responses)
+	CustomProtocolOpenAIChatCompletions = "openai_chat_completions" // OpenAI Chat Completions (/v1/chat/completions)
+	CustomProtocolOpenAIEmbeddings      = "openai_embeddings"       // OpenAI Embeddings (/v1/embeddings)
+	CustomProtocolAnthropicMessages     = "anthropic_messages"      // Anthropic Messages (/v1/messages)
+	CustomProtocolGemini                = "gemini"                  // Gemini (/v1beta/models)
 )
 
 // Sub-platform constants —— 同一 platform 下的账号变体判别符（accounts.sub_platform）。

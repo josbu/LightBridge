@@ -1331,6 +1331,10 @@ func isOpenAIAccountEligibleForRequest(ctx context.Context, account *Account, re
 	if account == nil || !account.IsOpenAI() || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		return false
 	}
+	// Custom 账号请求级协议匹配（sticky session 等绕过候选过滤的路径也需校验）。
+	if !accountMatchesRequestProtocol(ctx, account) {
+		return false
+	}
 	if paused, reason := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
 		// Debug level: this fires per-candidate on the scheduling hot path, so Info
 		// would amplify into log spam once several accounts cross the threshold.
@@ -2107,21 +2111,27 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64) ([]Account, error) {
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, PlatformOpenAI, false)
-		return accounts, err
+		if err != nil {
+			return nil, err
+		}
+		return filterAccountsByRequestProtocol(ctx, accounts), nil
 	}
+	// 候选含 Custom 账号（schedulingQueryPlatforms 追加 PlatformCustom）；跨栈由 IsOpenAI 过滤，
+	// 协议子类（responses/chat/embeddings）由 filterAccountsByRequestProtocol 收敛。
+	queryPlatforms := schedulingQueryPlatforms(PlatformOpenAI, false)
 	var accounts []Account
 	var err error
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, PlatformOpenAI)
+		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
 	} else if groupID != nil {
-		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformOpenAI)
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
 	} else {
-		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, PlatformOpenAI)
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	return accounts, nil
+	return filterAccountsByRequestProtocol(ctx, accounts), nil
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {

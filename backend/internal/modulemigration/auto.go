@@ -75,6 +75,9 @@ func RunAutoOpenAIModuleMigration(ctx context.Context, cfg *config.Config) (*Rep
 		ModuleDataDir:             cfg.Modules.DataDir,
 		InstallOpenAIModule:       !moduleAlreadyInstalled,
 		EnableOpenAIModule:        true,
+		// Source and target are the same database: convert legacy OpenAI
+		// accounts in place rather than duplicating them into module copies.
+		SameDatabase: true,
 	}
 	return Run(ctx, opts)
 }

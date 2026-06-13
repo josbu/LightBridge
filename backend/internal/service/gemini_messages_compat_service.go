@@ -267,6 +267,11 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 		return false
 	}
 
+	// Custom 账号请求级协议匹配（sticky session 等按 ID 取账号的路径也需校验）。
+	if !accountMatchesRequestProtocol(ctx, account) {
+		return false
+	}
+
 	// 速率限制预检
 	// Rate limit precheck
 	if !s.passesRateLimitPreCheckWithCache(ctx, account, requestedModel, precheckResult) {
@@ -432,23 +437,28 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 }
 
 func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
+	var accounts []Account
+	var err error
 	if s.schedulerSnapshot != nil {
-		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
-		return accounts, err
+		accounts, _, err = s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
+	} else {
+		useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
+		// Antigravity 账号现位于 gemini 平台之下，Custom 账号位于 custom 平台之下：
+		// schedulingQueryPlatforms 会把它们一并纳入候选，再由协议/平台过滤收敛。
+		queryPlatforms := schedulingQueryPlatforms(platform, useMixedScheduling)
+		if groupID != nil {
+			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+		} else {
+			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+		}
 	}
-
-	useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
-	// Antigravity 账号现位于 gemini 平台之下：强制 antigravity 别名需翻译为查询 gemini，
-	// 再由调用方的 isAccountValidForPlatform 过滤。
-	queryPlatforms := schedulingQueryPlatforms(platform, useMixedScheduling)
-
-	if groupID != nil {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	if err != nil {
+		return nil, err
 	}
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
-	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	// 请求级 Custom 协议过滤（按当前入站 endpoint 推导的 requiredProtocol）。
+	return filterAccountsByRequestProtocol(ctx, accounts), nil
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

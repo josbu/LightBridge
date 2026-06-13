@@ -175,7 +175,7 @@ func (a *Account) IsPrivacySet() bool {
 }
 
 func (a *Account) IsGemini() bool {
-	return a.Platform == PlatformGemini
+	return a.Platform == PlatformGemini || (a.IsCustom() && a.CustomProtocol() == CustomProtocolGemini)
 }
 
 // IsAntigravity 报告该账号是否为 Antigravity 账号。
@@ -197,12 +197,39 @@ func (a *Account) IsPureGemini() bool {
 
 // EffectivePlatform 返回账号对外暴露的平台标识（别名）。
 // Antigravity 账号在数据库中 Platform=="gemini"，但对外（配额归因、展示、
-// 向后兼容路由）仍呈现为 "antigravity"。其他账号返回其真实 Platform。
+// 向后兼容路由）仍呈现为 "antigravity"。其他账号返回其真实 Platform
+// （Custom 账号返回 "custom"）。
 func (a *Account) EffectivePlatform() string {
 	if a.IsAntigravity() {
 		return PlatformAntigravity
 	}
 	return a.Platform
+}
+
+// IsCustom 报告该账号是否为「自定义 Provider」账号（platform=="custom"）。
+// Custom 账号通过自定义 base_url + api_key 连接任意上游，并由 CustomProtocol()
+// 显式指定上游协议。
+func (a *Account) IsCustom() bool {
+	return a.Platform == PlatformCustom
+}
+
+// CustomProtocol 返回 Custom 账号选择的上游协议（见 CustomProtocol* 常量）。
+// 非 Custom 账号返回空串。
+func (a *Account) CustomProtocol() string {
+	if !a.IsCustom() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString("protocol"))
+}
+
+// IsCustomOpenAIProtocol / IsCustomAnthropicProtocol / IsCustomGeminiProtocol
+// 报告 Custom 账号的协议归属于哪个原生转发栈（供 Is*/转发逻辑复用）。
+func (a *Account) IsCustomOpenAIProtocol() bool {
+	switch a.CustomProtocol() {
+	case CustomProtocolOpenAIResponses, CustomProtocolOpenAIChatCompletions, CustomProtocolOpenAIEmbeddings:
+		return true
+	}
+	return false
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -764,20 +791,32 @@ func (a *Account) GetBaseURL() string {
 	if a.Type != AccountTypeAPIKey {
 		return ""
 	}
-	baseURL := a.GetCredential("base_url")
-	if baseURL == "" {
-		return "https://api.anthropic.com"
+	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
+	// Custom 账号：使用其自定义 base_url（必填，不回落官方）。
+	if a.IsCustom() {
+		return baseURL
 	}
 	if a.IsAntigravity() {
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com"
+		}
 		return strings.TrimRight(baseURL, "/") + "/antigravity"
 	}
-	return baseURL
+	// 原生 Anthropic apikey：锁定官方 URL，忽略任何历史 base_url 凭证。
+	return "https://api.anthropic.com"
 }
 
 // GetGeminiBaseURL 返回 Gemini 兼容端点的 base URL。
-// Antigravity 平台的 APIKey 账号自动拼接 /antigravity。
+// Custom（gemini 协议）账号使用自定义 base_url；Antigravity 平台的 APIKey 账号
+// 自动拼接 /antigravity；原生 Gemini 仍可使用自定义 base_url（不锁定）。
 func (a *Account) GetGeminiBaseURL(defaultBaseURL string) string {
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
+	if a.IsCustom() {
+		if baseURL == "" {
+			return defaultBaseURL
+		}
+		return baseURL
+	}
 	if baseURL == "" {
 		return defaultBaseURL
 	}
@@ -1079,11 +1118,12 @@ func (a *Account) IsAPIKeyOrBedrock() bool {
 }
 
 func (a *Account) IsOpenAI() bool {
-	return a.Platform == PlatformOpenAI
+	return a.Platform == PlatformOpenAI || (a.IsCustom() && a.IsCustomOpenAIProtocol())
 }
 
 func (a *Account) IsAnthropic() bool {
-	return a.Platform == PlatformAnthropic
+	return a.Platform == PlatformAnthropic ||
+		(a.IsCustom() && a.CustomProtocol() == CustomProtocolAnthropicMessages)
 }
 
 func (a *Account) IsOpenAIOAuth() bool {
@@ -1098,12 +1138,11 @@ func (a *Account) GetOpenAIBaseURL() string {
 	if !a.IsOpenAI() {
 		return ""
 	}
-	if a.Type == AccountTypeAPIKey {
-		baseURL := a.GetCredential("base_url")
-		if baseURL != "" {
-			return baseURL
-		}
+	// Custom（openai 协议）账号：使用其自定义 base_url。
+	if a.IsCustom() {
+		return strings.TrimSpace(a.GetCredential("base_url"))
 	}
+	// 原生 OpenAI：锁定官方 URL，忽略任何历史 base_url 凭证。
 	return "https://api.openai.com"
 }
 

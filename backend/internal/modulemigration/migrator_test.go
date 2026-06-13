@@ -2,6 +2,7 @@ package modulemigration
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"testing"
 
@@ -312,6 +313,109 @@ WHERE extra->>'provider_id' = $1
 	}
 	if !skip {
 		t.Fatal("skipDeletedOpenAIAccount() = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestUpsertOpenAIAccountConvertsInPlaceForSameDatabase verifies that the
+// in-place upgrade auto-migration converts a legacy openai account in place
+// (UPDATE the same row) instead of inserting a duplicate module account. This
+// is the regression guard for upgrades producing an extra OpenAI-form copy of
+// every account and re-adding accounts on each boot.
+func TestUpsertOpenAIAccountConvertsInPlaceForSameDatabase(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New(): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	m := &Migrator{
+		target: db,
+		opts:   Options{SourceKind: SourceLightBridge, SameDatabase: true},
+	}
+	record := accountRecord{
+		LegacyID:    "42",
+		Name:        "acc",
+		Type:        "oauth",
+		Credentials: map[string]any{"access_token": "t"},
+		Extra:       map[string]any{"provider_id": openAIProviderID},
+		Concurrency: 3,
+		Priority:    50,
+		Status:      "active",
+		Schedulable: true,
+	}
+
+	// No already-migrated module account exists yet.
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id FROM accounts
+WHERE extra->>'provider_id' = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NULL
+ORDER BY id ASC LIMIT 1`)).
+		WithArgs(openAIProviderID, SourceLightBridge, "42").
+		WillReturnError(sql.ErrNoRows)
+
+	// Expect an in-place UPDATE targeting the source row id (42), NOT an INSERT.
+	mock.ExpectExec(regexp.QuoteMeta(`
+UPDATE accounts
+SET name = $1, notes = NULLIF($2, ''), platform = 'module', type = $3,
+    credentials = $4, extra = $5, proxy_id = COALESCE($6, proxy_id), concurrency = $7, load_factor = $8,
+    priority = $9, status = $10, schedulable = $11, updated_at = NOW()
+WHERE id = $12 AND platform = 'openai' AND deleted_at IS NULL`)).
+		WithArgs(
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), int64(42),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := m.upsertOpenAIAccount(context.Background(), record); err != nil {
+		t.Fatalf("upsertOpenAIAccount() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestUpsertOpenAIAccountSkipsNonNumericLegacyIDForSameDatabase verifies that a
+// same-database migration skips (rather than inserts a duplicate) when the
+// legacy id is not the numeric account id and therefore cannot be converted in
+// place.
+func TestUpsertOpenAIAccountSkipsNonNumericLegacyIDForSameDatabase(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New(): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	m := &Migrator{
+		target: db,
+		opts:   Options{SourceKind: SourceLightBridge, SameDatabase: true},
+	}
+	record := accountRecord{
+		LegacyID:    "user@example.com",
+		Name:        "acc",
+		Type:        "oauth",
+		Credentials: map[string]any{"access_token": "t"},
+		Extra:       map[string]any{"provider_id": openAIProviderID},
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT id FROM accounts
+WHERE extra->>'provider_id' = $1
+  AND extra->'module_migration'->>'source' = $2
+  AND extra->'module_migration'->>'legacy_account_id' = $3::text
+  AND deleted_at IS NULL
+ORDER BY id ASC LIMIT 1`)).
+		WithArgs(openAIProviderID, SourceLightBridge, "user@example.com").
+		WillReturnError(sql.ErrNoRows)
+	// No UPDATE and no INSERT expected.
+
+	if err := m.upsertOpenAIAccount(context.Background(), record); err != nil {
+		t.Fatalf("upsertOpenAIAccount() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

@@ -118,8 +118,8 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactAPIKeyUsesCompact
 	updateCalls := make(chan map[string]any, 1)
 	account := Account{
 		ID:          3,
-		Name:        "openai-apikey",
-		Platform:    PlatformOpenAI,
+		Name:        "custom-openai-responses",
+		Platform:    PlatformCustom,
 		Type:        AccountTypeAPIKey,
 		Status:      StatusActive,
 		Schedulable: true,
@@ -128,6 +128,9 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactAPIKeyUsesCompact
 			"api_key":               "sk-test",
 			"base_url":              "https://example.com/v1",
 			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
+		},
+		Extra: map[string]any{
+			"protocol": CustomProtocolOpenAIResponses,
 		},
 	}
 	repo := &snapshotUpdateAccountRepo{

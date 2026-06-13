@@ -6539,6 +6539,7 @@ export default {
     releaseNotes: 'Release Notes',
     noReleaseNotes: 'No release notes',
     upgradeChangesTitle: 'Upgrade Changes',
+    viewUpgradeChanges: 'Changelog',
     noSectionChanges: 'No changes',
     sections: {
       main: 'Main Features',

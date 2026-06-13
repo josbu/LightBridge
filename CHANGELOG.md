@@ -6,6 +6,48 @@
 
 ---
 
+## v0.1.7
+
+### 新增
+
+- **Custom Provider 支持**：新增独立的 Custom 平台类型，允许配置自定义上游端点 (Base URL) + 协议类型。支持 5 种协议：
+  - OpenAI Responses
+  - OpenAI Chat Completions  
+  - OpenAI Embeddings
+  - Anthropic Messages
+  - Gemini
+- Custom 账户可加入任意分组，按其 protocol 与请求的入站 endpoint 自动匹配调度。
+- **Base URL 安全增强**：OpenAI 和 Anthropic 官方账户的 Base URL 现已锁定为官方地址，不再允许自定义（提升安全性）。Gemini Base URL 保持可编辑。
+
+### 优化
+
+- **数据模型优化**：
+  - 新增 `accounts.extra[“protocol”]` 字段存储 Custom 账户的协议类型
+  - Account DTO 新增 `protocol` 字段用于前端展示和编辑
+  - 错误透传规则、配额平台白名单、兜底模型配置均已支持 Custom 平台
+- **调度优化**：Custom 账户不受分组类型限制，可被任意分组按协议匹配调度
+- **路由优化**：Custom 分组请求根据入站 endpoint 自动分派到对应的原生协议 handler
+- 版本控制页面精简：移除”发布版本”区块多余的标题与描述，移除每个版本下方重复的 `LightBridge X.X.X` 名称行。
+- 版本控制页面为每个版本新增”升级内容”按钮，可直接查看该版本的升级说明（无需先安装）。
+
+### 数据迁移
+
+- 自动将存量带非官方 Base URL 的 OpenAI/Anthropic API Key 账户迁移为 Custom 平台
+- 保留原分组成员关系，实现零破坏迁移
+- 更新 `user_platform_quotas` 表约束以支持 Custom 平台
+
+### 修复
+
+- 修复版本升级时同一个账号会被重复迁移为 Gemini OAuth 的问题。
+- 修复版本升级时已删除的账户会被重新添加的问题。
+
+### 测试
+
+- 更新测试用例以适配 Base URL 锁定和 Custom 平台
+- 所有相关单元测试通过验证
+
+---
+
 ## v0.1.6
 
 ### 新增

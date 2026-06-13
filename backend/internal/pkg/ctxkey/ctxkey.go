@@ -8,6 +8,11 @@ const (
 	// ForcePlatform 强制平台（用于 /antigravity 路由），由 middleware.ForcePlatform 设置
 	ForcePlatform Key = "ctx_force_platform"
 
+	// RequiredProtocol 当前请求的「所需上游协议」（见 service.CustomProtocol* 常量），
+	// 由 handler 依入站 endpoint 推导并注入。用于 Custom 账号的请求级调度过滤：
+	// 仅 protocol 与之一致的 Custom 账号可服务该请求。为空表示无协议约束。
+	RequiredProtocol Key = "ctx_required_protocol"
+
 	// RequestID 为服务端生成/透传的请求 ID。
 	RequestID Key = "ctx_request_id"
 

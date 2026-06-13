@@ -201,12 +201,14 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
 	out := &Account{
-		ID:                      a.ID,
-		Name:                    a.Name,
-		Notes:                   a.Notes,
+		ID:   a.ID,
+		Name: a.Name,
+		Notes: a.Notes,
 		// 对外暴露 EffectivePlatform：Antigravity 账号 DB 中 platform=="gemini"，
 		// 但 API/前端仍以别名 "antigravity" 呈现，保持前端展示/筛选逻辑不变。
-		Platform:                a.EffectivePlatform(),
+		Platform: a.EffectivePlatform(),
+		// Custom 账户的协议类型（用于前端编辑/展示）
+		Protocol:                a.CustomProtocol(),
 		Type:                    a.Type,
 		Credentials:             redactedCreds,
 		CredentialsStatus:       credsStatus,

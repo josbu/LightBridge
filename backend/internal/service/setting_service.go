@@ -3707,6 +3707,9 @@ func (s *SettingService) GetFallbackModel(ctx context.Context, platform string) 
 	case PlatformAntigravity:
 		key = SettingKeyFallbackModelAntigravity
 		defaultModel = "gemini-2.5-pro"
+	case PlatformCustom:
+		// Custom 账户按 protocol 转发,兜底模型由其 protocol 对应的原生平台决定
+		return ""
 	default:
 		return ""
 	}

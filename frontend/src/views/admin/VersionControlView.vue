@@ -117,15 +117,6 @@
     </div>
 
     <div class="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-      <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white">
-          {{ t('version.publishedVersions') }}
-        </h2>
-        <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">
-          {{ t('version.publishedVersionsDescription') }}
-        </p>
-      </div>
-
       <div v-if="loading" class="flex items-center justify-center py-16">
         <Icon name="refresh" size="lg" :stroke-width="2" class="animate-spin text-primary-500" />
       </div>
@@ -175,9 +166,6 @@
                 {{ t('version.prerelease') }}
               </span>
             </div>
-            <p v-if="release.name" class="mt-1 truncate text-sm text-gray-600 dark:text-dark-300">
-              {{ release.name }}
-            </p>
             <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-dark-400">
               <span>{{ formatDate(release.published_at) }}</span>
               <a
@@ -193,19 +181,29 @@
             </div>
           </div>
 
-          <button
-            type="button"
-            class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="!isReleaseBuild || updating || restarting || isSameVersion(release.version, currentVersion)"
-            @click="confirmInstall(release)"
-          >
-            <Icon name="download" size="sm" :stroke-width="2" />
-            {{
-              isSameVersion(release.version, currentVersion)
-                ? t('version.installed')
-                : t('version.installVersion')
-            }}
-          </button>
+          <div class="flex items-center gap-2 md:justify-end">
+            <button
+              type="button"
+              class="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200 dark:hover:bg-dark-700"
+              @click="showUpgradeChanges(release)"
+            >
+              <Icon name="infoCircle" size="sm" :stroke-width="2" />
+              {{ t('version.viewUpgradeChanges') }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="!isReleaseBuild || updating || restarting || isSameVersion(release.version, currentVersion)"
+              @click="confirmInstall(release)"
+            >
+              <Icon name="download" size="sm" :stroke-width="2" />
+              {{
+                isSameVersion(release.version, currentVersion)
+                  ? t('version.installed')
+                  : t('version.installVersion')
+              }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -228,9 +226,9 @@
 
     <UpgradeChangesDialog
       :show="upgradeChangesOpen"
-      :version="installedRelease?.version"
-      :body="installedRelease?.body"
-      :html-url="installedRelease?.html_url"
+      :version="upgradeChangesRelease?.version"
+      :body="upgradeChangesRelease?.body"
+      :html-url="upgradeChangesRelease?.html_url"
       @close="upgradeChangesOpen = false"
     />
   </div>
@@ -269,7 +267,7 @@ const restarting = ref(false)
 const restartCountdown = ref(0)
 const confirmDialogOpen = ref(false)
 const selectedRelease = ref<VersionRelease | null>(null)
-const installedRelease = ref<VersionRelease | null>(null)
+const upgradeChangesRelease = ref<VersionRelease | null>(null)
 const upgradeChangesOpen = ref(false)
 
 const isReleaseBuild = computed(() => buildType.value === 'release')
@@ -341,6 +339,11 @@ function confirmInstall(release: VersionRelease) {
   confirmDialogOpen.value = true
 }
 
+function showUpgradeChanges(release: VersionRelease) {
+  upgradeChangesRelease.value = release
+  upgradeChangesOpen.value = true
+}
+
 async function handleInstall() {
   if (!selectedRelease.value || updating.value) return
 
@@ -355,7 +358,7 @@ async function handleInstall() {
     const result = await performUpdate({ version: selectedRelease.value.version })
     updateSuccess.value = true
     needRestart.value = result.need_restart
-    installedRelease.value = release
+    upgradeChangesRelease.value = release
     upgradeChangesOpen.value = true
     appStore.clearVersionCache()
     try {

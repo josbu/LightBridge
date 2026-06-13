@@ -6694,6 +6694,7 @@ export default {
     releaseNotes: '更新日志',
     noReleaseNotes: '暂无更新日志',
     upgradeChangesTitle: '升级变化',
+    viewUpgradeChanges: '升级内容',
     noSectionChanges: '无',
     sections: {
       main: '主要功能',
