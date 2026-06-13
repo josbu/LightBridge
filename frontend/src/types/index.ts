@@ -685,6 +685,54 @@ export interface UpdateGroupRequest {
   copy_accounts_from_group_ids?: number[]
 }
 
+// ==================== LightBridge Connect Types ====================
+
+export type LightBridgeConnectType = 'new-api'
+
+export interface LightBridgeConnectQuotaInfo {
+  balance: number // 余额（分）
+  used: number // 已使用（分）
+  last_sync_at?: string
+  currency: string // CNY, USD, etc.
+}
+
+export interface LightBridgeConnectAlertConfig {
+  enabled: boolean
+  threshold: number // 阈值（分）
+  channels: ('email' | 'webhook' | 'dashboard')[]
+  auto_disable_on_low: boolean // 余额不足自动禁用
+}
+
+export interface LightBridgeConnectConfig {
+  type: LightBridgeConnectType
+  instance_url: string
+  system_token: string // 加密存储
+  user_id?: number
+  username?: string
+  quota?: LightBridgeConnectQuotaInfo
+  alert?: LightBridgeConnectAlertConfig
+  webhook_url?: string
+  sync_interval: number // 同步间隔（秒）
+  last_verified_at?: string
+}
+
+export interface VerifyLightBridgeConnectTokenRequest {
+  type: LightBridgeConnectType
+  instance_url: string
+  system_token: string
+}
+
+export interface VerifyLightBridgeConnectTokenResponse {
+  valid: boolean
+  user_id?: number
+  username?: string
+  display_name?: string
+  email?: string
+  quota?: number // balance in cents
+  used_quota?: number // used in cents
+  error_msg?: string
+}
+
 // ==================== Account & Proxy Types ====================
 
 export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'custom'
@@ -909,6 +957,9 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+
+  // LightBridge Connect (New API 深度集成)
+  lightbridge_connect?: LightBridgeConnectConfig | null
 }
 
 // Account Usage types

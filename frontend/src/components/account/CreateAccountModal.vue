@@ -302,6 +302,15 @@
         />
       </div>
 
+      <!-- LightBridge Connect Configuration (for New API and compatible services) -->
+      <div v-if="form.platform === 'custom' && shouldShowLightBridgeConnect">
+        <LightBridgeConnectConfig
+          :instance-url="form.customBaseUrl"
+          v-model="form.lightBridgeConnect"
+          @verified="handleLightBridgeConnectVerified"
+        />
+      </div>
+
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -3369,6 +3378,10 @@ import {
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
+import {
+  PRESETS_BY_PROTOCOL,
+  findPresetById
+} from '@/config/customProviderPresets'
 import type {
   Proxy,
   AdminGroup,
@@ -3390,6 +3403,7 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
+import LightBridgeConnectConfig from '@/components/account/LightBridgeConnectConfig.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
@@ -3822,6 +3836,40 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
+// Custom Provider Presets
+const selectedPreset = ref('')
+const presetsByProtocol = PRESETS_BY_PROTOCOL
+
+// Protocol mapping: preset protocol -> LightBridge form protocol
+const protocolMapping: Record<string, string> = {
+  'openai-chat': 'openai_chat_completions',
+  'openai-responses': 'openai_responses',
+  'openai-embeddings': 'openai_embeddings',
+  'anthropic': 'anthropic_messages',
+  'gemini': 'gemini'
+}
+
+const applyPreset = () => {
+  if (!selectedPreset.value) return
+
+  const preset = findPresetById(selectedPreset.value)
+  if (!preset) return
+
+  // Auto-fill Base URL and Protocol
+  form.customBaseUrl = preset.baseUrl
+  form.customProtocol = protocolMapping[preset.protocol] || ''
+
+  // Auto-fill account name if empty
+  if (!form.name.trim()) {
+    form.name = preset.name
+  }
+
+  // Fill notes with provider info if empty
+  if (!form.notes.trim() && preset.description) {
+    form.notes = preset.description
+  }
+}
+
 const form = reactive({
   name: '',
   notes: '',
@@ -3838,7 +3886,9 @@ const form = reactive({
   // Custom provider fields
   customProtocol: '',
   customBaseUrl: '',
-  customApiKey: ''
+  customApiKey: '',
+  // LightBridge Connect
+  lightBridgeConnect: null as any
 })
 
 // Helper to check if current type needs OAuth flow
@@ -3853,6 +3903,29 @@ const isOAuthFlow = computed(() => {
   }
   return accountCategory.value === 'oauth-based'
 })
+
+// Check if should show LightBridge Connect configuration
+const shouldShowLightBridgeConnect = computed(() => {
+  if (form.platform !== 'custom') return false
+
+  // Check if selected preset supports LightBridge Connect
+  if (selectedPreset.value) {
+    const preset = findPresetById(selectedPreset.value)
+    return preset?.supportsLightBridgeConnect === true
+  }
+
+  // Check if Base URL contains known New API patterns
+  const url = form.customBaseUrl.toLowerCase()
+  return url.includes('new-api') || url.includes('newapi') || url.includes(':3000')
+})
+
+// Handle LightBridge Connect verification success
+const handleLightBridgeConnectVerified = (result: any) => {
+  // Auto-fill account name if empty and username is available
+  if (!form.name.trim() && result.username) {
+    form.name = `New API - ${result.username}`
+  }
+}
 
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'

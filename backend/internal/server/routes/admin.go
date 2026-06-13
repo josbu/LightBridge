@@ -334,6 +334,15 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Antigravity 默认模型映射
 		accounts.GET("/antigravity/default-model-mapping", h.Admin.Account.GetAntigravityDefaultModelMapping)
 
+		// LightBridge Connect (New API deep integration)
+		lbc := accounts.Group("/:id/lightbridge-connect")
+		{
+			lbc.POST("/verify-token", h.Admin.LightBridgeConnect.VerifyToken)
+			lbc.GET("/quota", h.Admin.LightBridgeConnect.GetQuota)
+			lbc.POST("/sync-quota", h.Admin.LightBridgeConnect.SyncQuota)
+			lbc.PUT("/alert-config", h.Admin.LightBridgeConnect.UpdateAlertConfig)
+		}
+
 	}
 }
 

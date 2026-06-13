@@ -340,7 +340,13 @@ export default {
         hoursMinutes: '{h}h {m}m',
         minutes: '{m}m',
         withSuffix: '{time} 后解除'
-      }
+      },
+      minutes: '分钟',
+      seconds: '秒'
+    },
+    currency: {
+      yuan: '元',
+      usd: '美元'
     }
   },
 
@@ -4107,6 +4113,15 @@ export default {
       },
       custom: {
         title: 'Custom Provider',
+        preset: 'Provider 预设',
+        selectPreset: '选择预设（可选）',
+        presetHint: '选择常用服务商以自动填充 Base URL 和协议类型',
+        presetGroups: {
+          openaiChat: 'OpenAI Chat Completions 兼容',
+          openaiResponses: 'OpenAI Responses',
+          openaiEmbeddings: 'OpenAI Embeddings',
+          anthropic: 'Anthropic Messages 兼容'
+        },
         protocol: '协议类型',
         selectProtocol: '请选择协议类型',
         protocolOptions: {
@@ -4122,6 +4137,46 @@ export default {
         pleaseSelectProtocol: '请选择协议类型',
         pleaseEnterBaseUrl: '请输入 Base URL',
         pleaseEnterApiKey: '请输入 API Key'
+      },
+      // LightBridge Connect (New API 深度集成)
+      lightBridgeConnect: {
+        title: 'LightBridge Connect',
+        description: '与 New API 深度集成 - 监控余额、自动同步、智能警报',
+        systemToken: '系统访问令牌',
+        systemTokenPlaceholder: '输入您的 New API 系统访问令牌',
+        systemTokenHint: '在 New API 中生成令牌：个人设置 → 安全设置 → 系统访问令牌',
+        verify: '验证令牌',
+        verifying: '验证中...',
+        verifySuccess: '令牌验证成功！',
+        verifyFailed: '令牌验证失败',
+        verifyError: '验证令牌时出错',
+        username: '用户名',
+        displayName: '显示名',
+        email: '邮箱',
+        balance: '当前余额',
+        alertConfig: '余额警报配置',
+        enableAlert: '启用余额警报',
+        alertThreshold: '警报阈值',
+        alertThresholdPlaceholder: '100',
+        alertThresholdHint: '当余额低于此金额时触发警报',
+        alertChannels: '警报渠道',
+        channels: {
+          dashboard: '仪表盘通知',
+          email: '邮件通知',
+          webhook: 'Webhook 通知'
+        },
+        webhookUrl: 'Webhook URL',
+        webhookUrlPlaceholder: 'https://your-webhook-url.com/notify',
+        webhookUrlHint: '触发警报时将向此 URL 发送 POST 请求',
+        autoDisable: '余额不足自动禁用',
+        autoDisableHint: '当余额耗尽时自动暂停账号',
+        syncInterval: '同步间隔',
+        syncIntervalHint: '自动从 New API 同步余额的频率',
+        quotaLow: '余额不足',
+        quotaExhausted: '余额耗尽',
+        syncSuccess: '余额同步成功',
+        syncFailed: '余额同步失败',
+        lastSyncAt: '上次同步'
       },
       // Re-Auth Modal
       reAuthorizeAccount: '重新授权账号',

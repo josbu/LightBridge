@@ -41,6 +41,7 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	moduleHandler *admin.ModuleHandler,
 	uiThemeHandler *admin.UIThemeHandler,
+	lightBridgeConnectHandler *admin.LightBridgeConnectHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -75,6 +76,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Module:                 moduleHandler,
 		UITheme:                uiThemeHandler,
+		LightBridgeConnect:     lightBridgeConnectHandler,
 	}
 }
 
@@ -196,6 +198,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewModuleHandler,
 	admin.NewUIThemeHandler,
+	admin.NewLightBridgeConnectHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

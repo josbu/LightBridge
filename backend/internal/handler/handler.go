@@ -38,6 +38,7 @@ type AdminHandlers struct {
 	Affiliate              *admin.AffiliateHandler
 	Module                 *admin.ModuleHandler
 	UITheme                *admin.UIThemeHandler
+	LightBridgeConnect     *admin.LightBridgeConnectHandler
 }
 
 // Handlers contains all HTTP handlers

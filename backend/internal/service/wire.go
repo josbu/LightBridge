@@ -570,6 +570,8 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+	ProvideLightBridgeConnectService,
+	ProvideLightBridgeConnectSyncService,
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
@@ -624,4 +626,26 @@ func ProvideChannelMonitorRunner(svc *ChannelMonitorService, settingService *Set
 	svc.SetScheduler(r)
 	r.Start()
 	return r
+}
+
+// ProvideLightBridgeConnectService creates LightBridgeConnectService with encryption key from config
+func ProvideLightBridgeConnectService(cfg *config.Config) *LightBridgeConnectService {
+	// Use JWT secret as encryption key for LightBridge Connect tokens
+	// In production, consider using a separate dedicated key
+	encryptionKey := cfg.JWT.Secret
+	if encryptionKey == "" {
+		encryptionKey = "default-lightbridge-connect-key-change-me"
+	}
+	return NewLightBridgeConnectService(encryptionKey)
+}
+
+// ProvideLightBridgeConnectSyncService creates and starts the sync service
+func ProvideLightBridgeConnectSyncService(
+	lbcService *LightBridgeConnectService,
+	db *sql.DB,
+) *LightBridgeConnectSyncService {
+	// 默认 5 分钟同步一次
+	svc := NewLightBridgeConnectSyncService(lbcService, db, 5*time.Minute)
+	svc.Start()
+	return svc
 }

@@ -29,6 +29,10 @@ export interface CustomProviderPreset {
   apiKeyUrl?: string
   /** 文档链接 */
   docsUrl?: string
+  /** 是否支持 LightBridge Connect（深度集成） */
+  supportsLightBridgeConnect?: boolean
+  /** LightBridge Connect 类型 */
+  lightBridgeConnectType?: 'new-api'
 }
 
 /**
@@ -329,7 +333,9 @@ export const CUSTOM_PROVIDER_PRESETS: CustomProviderPreset[] = [
     protocol: 'openai-chat',
     description: 'New API - 自建中转服务',
     officialUrl: 'https://docs.newapi.pro/',
-    docsUrl: 'https://docs.newapi.pro'
+    docsUrl: 'https://docs.newapi.pro',
+    supportsLightBridgeConnect: true,
+    lightBridgeConnectType: 'new-api'
   },
   {
     id: 'gpustack',

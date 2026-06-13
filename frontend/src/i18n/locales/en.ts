@@ -340,7 +340,13 @@ export default {
         hoursMinutes: '{h}h {m}m',
         minutes: '{m}m',
         withSuffix: '{time} to lift'
-      }
+      },
+      minutes: 'minutes',
+      seconds: 'seconds'
+    },
+    currency: {
+      yuan: 'CNY',
+      usd: 'USD'
     }
   },
 
@@ -3980,6 +3986,15 @@ export default {
       },
       custom: {
         title: 'Custom Provider',
+        preset: 'Provider Preset',
+        selectPreset: 'Select a preset (optional)',
+        presetHint: 'Choose a common provider to auto-fill Base URL and Protocol',
+        presetGroups: {
+          openaiChat: 'OpenAI Chat Completions Compatible',
+          openaiResponses: 'OpenAI Responses',
+          openaiEmbeddings: 'OpenAI Embeddings',
+          anthropic: 'Anthropic Messages Compatible'
+        },
         protocol: 'Protocol',
         selectProtocol: 'Please select a protocol',
         protocolOptions: {
@@ -3995,6 +4010,46 @@ export default {
         pleaseSelectProtocol: 'Please select a protocol',
         pleaseEnterBaseUrl: 'Please enter Base URL',
         pleaseEnterApiKey: 'Please enter API Key'
+      },
+      // LightBridge Connect (New API Deep Integration)
+      lightBridgeConnect: {
+        title: 'LightBridge Connect',
+        description: 'Deep integration with New API - Monitor quota, auto-sync balance, and get alerts',
+        systemToken: 'System Access Token',
+        systemTokenPlaceholder: 'Enter your New API system access token',
+        systemTokenHint: 'Generate this token in New API: Personal Settings → Security → System Access Token',
+        verify: 'Verify Token',
+        verifying: 'Verifying...',
+        verifySuccess: 'Token verified successfully!',
+        verifyFailed: 'Token verification failed',
+        verifyError: 'Failed to verify token',
+        username: 'Username',
+        displayName: 'Display Name',
+        email: 'Email',
+        balance: 'Current Balance',
+        alertConfig: 'Quota Alert Configuration',
+        enableAlert: 'Enable Quota Alerts',
+        alertThreshold: 'Alert Threshold',
+        alertThresholdPlaceholder: '100',
+        alertThresholdHint: 'Trigger alert when balance falls below this amount',
+        alertChannels: 'Alert Channels',
+        channels: {
+          dashboard: 'Dashboard Notification',
+          email: 'Email Notification',
+          webhook: 'Webhook Notification'
+        },
+        webhookUrl: 'Webhook URL',
+        webhookUrlPlaceholder: 'https://your-webhook-url.com/notify',
+        webhookUrlHint: 'POST requests will be sent to this URL when alerts are triggered',
+        autoDisable: 'Auto-disable on Low Quota',
+        autoDisableHint: 'Automatically pause account when quota is exhausted',
+        syncInterval: 'Sync Interval',
+        syncIntervalHint: 'How often to automatically sync quota from New API',
+        quotaLow: 'Quota Low',
+        quotaExhausted: 'Quota Exhausted',
+        syncSuccess: 'Quota synced successfully',
+        syncFailed: 'Failed to sync quota',
+        lastSyncAt: 'Last synced'
       },
       // Re-Auth Modal
       reAuthorizeAccount: 'Re-Authorize Account',
