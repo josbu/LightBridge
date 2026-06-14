@@ -184,6 +184,10 @@ func (s *stubAdminService) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	return len(userIDs), nil
 }
 
+func (s *stubAdminService) BatchUpdateUsers(ctx context.Context, userIDs []int64, input service.BatchUpdateUsersInput) (*service.BatchUpdateUsersResult, error) {
+	return &service.BatchUpdateUsersResult{Total: len(userIDs), Success: len(userIDs)}, nil
+}
+
 func (s *stubAdminService) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]service.APIKey, int64, error) {
 	return s.apiKeys, int64(len(s.apiKeys)), nil
 }
