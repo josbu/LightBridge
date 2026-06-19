@@ -567,6 +567,8 @@ export interface SystemSettings {
   payment_enabled: boolean;
   risk_control_enabled: boolean;
   privacy_filter_enabled: boolean;
+  /** 部署模式：personal（个人）/ distribution（分发） */
+  deployment_mode: 'personal' | 'distribution' | string;
   payment_min_amount: number;
   payment_max_amount: number;
   payment_daily_limit: number;
@@ -799,6 +801,8 @@ export interface UpdateSettingsRequest {
   payment_enabled?: boolean;
   risk_control_enabled?: boolean;
   privacy_filter_enabled?: boolean;
+  /** 部署模式：personal（个人）/ distribution（分发） */
+  deployment_mode?: 'personal' | 'distribution' | string;
   payment_min_amount?: number;
   payment_max_amount?: number;
   payment_daily_limit?: number;

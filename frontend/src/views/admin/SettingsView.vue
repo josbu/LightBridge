@@ -5337,6 +5337,62 @@
           </div>
         </div>
 
+        <!-- 部署模式：个人 / 分发 -->
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.deploymentMode.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.deploymentMode.description') }}
+            </p>
+          </div>
+          <div class="space-y-4 p-6">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                @click="form.deployment_mode = 'distribution'"
+                :class="[
+                  'rounded-lg border p-4 text-left transition-all',
+                  form.deployment_mode !== 'personal'
+                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500 dark:bg-primary-900/20'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-dark-600 dark:hover:border-dark-500'
+                ]"
+              >
+                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('admin.settings.features.deploymentMode.distribution') }}
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.deploymentMode.distributionHint') }}
+                </p>
+              </button>
+              <button
+                type="button"
+                @click="form.deployment_mode = 'personal'"
+                :class="[
+                  'rounded-lg border p-4 text-left transition-all',
+                  form.deployment_mode === 'personal'
+                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500 dark:bg-primary-900/20'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-dark-600 dark:hover:border-dark-500'
+                ]"
+              >
+                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('admin.settings.features.deploymentMode.personal') }}
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.deploymentMode.personalHint') }}
+                </p>
+              </button>
+            </div>
+            <p
+              v-if="form.deployment_mode === 'personal'"
+              class="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+            >
+              {{ t('admin.settings.features.deploymentMode.personalWarning') }}
+            </p>
+          </div>
+        </div>
+
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
@@ -7162,6 +7218,7 @@ const form = reactive<SettingsForm>({
   payment_enabled: false,
   risk_control_enabled: false,
   privacy_filter_enabled: false,
+  deployment_mode: 'distribution',
   payment_min_amount: 1,
   payment_max_amount: 10000,
   payment_daily_limit: 50000,
@@ -8432,6 +8489,7 @@ async function saveSettings() {
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
       privacy_filter_enabled: form.privacy_filter_enabled,
+      deployment_mode: form.deployment_mode,
       payment_min_amount: Number(form.payment_min_amount) || 0,
       payment_max_amount: Number(form.payment_max_amount) || 0,
       payment_daily_limit: Number(form.payment_daily_limit) || 0,

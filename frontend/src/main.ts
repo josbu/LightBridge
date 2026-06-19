@@ -1,9 +1,10 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import router from './router'
+import router, { syncDistributionRoutes } from './router'
 import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
+import { isDistributionModeNow } from '@/composables/useDeploymentMode'
 import './style.css'
 
 function initThemeClass() {
@@ -26,6 +27,10 @@ async function bootstrap() {
   // This must happen after pinia is installed but before router and i18n
   const appStore = useAppStore()
   appStore.initFromInjectedConfig()
+
+  // 依据注入的 public settings 决定是否注册分发模式路由。
+  // 个人模式下不注册 → 对应 chunk 永不下载（结构性移除）；分发模式注册后按需下载。
+  syncDistributionRoutes(isDistributionModeNow())
 
   // Set document title immediately after config is loaded
   if (appStore.siteName && appStore.siteName !== 'LightBridge') {

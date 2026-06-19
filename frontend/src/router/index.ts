@@ -10,6 +10,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
+import { isPersonalModeNow, isDistributionPath } from '@/composables/useDeploymentMode'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveDocumentTitle } from './title'
 
@@ -217,18 +218,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/redeem',
-    name: 'Redeem',
-    component: () => import('@/views/user/RedeemView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Redeem Code',
-      titleKey: 'redeem.title',
-      descriptionKey: 'redeem.description'
-    }
-  },
-  {
     path: '/affiliate',
     name: 'Affiliate',
     component: () => import('@/views/user/AffiliateView.vue'),
@@ -262,18 +251,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Profile',
       titleKey: 'profile.title',
       descriptionKey: 'profile.description'
-    }
-  },
-  {
-    path: '/subscriptions',
-    name: 'Subscriptions',
-    component: () => import('@/views/user/SubscriptionsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'My Subscriptions',
-      titleKey: 'userSubscriptions.title',
-      descriptionKey: 'userSubscriptions.description'
     }
   },
   {
@@ -465,18 +442,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/subscriptions',
-    name: 'AdminSubscriptions',
-    component: () => import('@/views/admin/SubscriptionsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Subscription Management',
-      titleKey: 'admin.subscriptions.title',
-      descriptionKey: 'admin.subscriptions.description'
-    }
-  },
-  {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),
@@ -489,18 +454,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/announcements',
-    name: 'AdminAnnouncements',
-    component: () => import('@/views/admin/AnnouncementsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Announcements',
-      titleKey: 'admin.announcements.title',
-      descriptionKey: 'admin.announcements.description'
-    }
-  },
-  {
     path: '/admin/proxies',
     name: 'AdminProxies',
     component: () => import('@/views/admin/ProxiesView.vue'),
@@ -510,30 +463,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Proxy Management',
       titleKey: 'admin.proxies.title',
       descriptionKey: 'admin.proxies.description'
-    }
-  },
-  {
-    path: '/admin/redeem',
-    name: 'AdminRedeem',
-    component: () => import('@/views/admin/RedeemView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Redeem Code Management',
-      titleKey: 'admin.redeem.title',
-      descriptionKey: 'admin.redeem.description'
-    }
-  },
-  {
-    path: '/admin/promo-codes',
-    name: 'AdminPromoCodes',
-    component: () => import('@/views/admin/PromoCodesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Promo Code Management',
-      titleKey: 'admin.promo.title',
-      descriptionKey: 'admin.promo.description'
     }
   },
   {
@@ -570,19 +499,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Modules',
       titleKey: 'modules.title',
       descriptionKey: 'modules.description'
-    }
-  },
-  {
-    path: '/admin/risk-control',
-    name: 'AdminRiskControl',
-    component: () => import('@/views/admin/RiskControlView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Risk Control',
-      titleKey: 'admin.riskControl.title',
-      descriptionKey: 'admin.riskControl.description',
-      requiresRiskControl: true
     }
   },
   {
@@ -702,6 +618,109 @@ const routes: RouteRecordRaw[] = [
 ]
 
 /**
+ * 分发模式专属路由（公告 / 风控 / 兑换码 / 优惠码 / 订阅）。
+ *
+ * 这些路由 **不** 包含在初始 `routes` 中。个人模式下它们不会被注册，对应的
+ * lazy `import()` chunk 永远不会下载（= 渐进式结构性移除）。切换到分发模式时，
+ * `syncDistributionRoutes(true)` 通过 `router.addRoute()` 动态注册，浏览器在导航
+ * 到对应页面时才按需下载 chunk —— 即「在分发模式下再下载」。
+ *
+ * 注意：catch-all 404 必须始终位于路由表末尾，因此动态添加的路由要插在它之前。
+ * 这里借助命名路由 + `addRoute` 的语义实现：vue-router 的 `addRoute` 会把新路由
+ * 追加进匹配器，但具名 404（`/:pathMatch(.*)*`) 的优先级最低，仍能正确兜底。
+ */
+const distributionRoutes: RouteRecordRaw[] = [
+  // ---- 用户端 ----
+  {
+    path: '/redeem',
+    name: 'Redeem',
+    component: () => import('@/views/user/RedeemView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Redeem Code',
+      titleKey: 'redeem.title',
+      descriptionKey: 'redeem.description'
+    }
+  },
+  {
+    path: '/subscriptions',
+    name: 'Subscriptions',
+    component: () => import('@/views/user/SubscriptionsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'My Subscriptions',
+      titleKey: 'userSubscriptions.title',
+      descriptionKey: 'userSubscriptions.description'
+    }
+  },
+  // ---- 管理端 ----
+  {
+    path: '/admin/subscriptions',
+    name: 'AdminSubscriptions',
+    component: () => import('@/views/admin/SubscriptionsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Subscription Management',
+      titleKey: 'admin.subscriptions.title',
+      descriptionKey: 'admin.subscriptions.description'
+    }
+  },
+  {
+    path: '/admin/announcements',
+    name: 'AdminAnnouncements',
+    component: () => import('@/views/admin/AnnouncementsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Announcements',
+      titleKey: 'admin.announcements.title',
+      descriptionKey: 'admin.announcements.description'
+    }
+  },
+  {
+    path: '/admin/redeem',
+    name: 'AdminRedeem',
+    component: () => import('@/views/admin/RedeemView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Redeem Code Management',
+      titleKey: 'admin.redeem.title',
+      descriptionKey: 'admin.redeem.description'
+    }
+  },
+  {
+    path: '/admin/promo-codes',
+    name: 'AdminPromoCodes',
+    component: () => import('@/views/admin/PromoCodesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Promo Code Management',
+      titleKey: 'admin.promo.title',
+      descriptionKey: 'admin.promo.description'
+    }
+  },
+  {
+    path: '/admin/risk-control',
+    name: 'AdminRiskControl',
+    component: () => import('@/views/admin/RiskControlView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Risk Control',
+      titleKey: 'admin.riskControl.title',
+      descriptionKey: 'admin.riskControl.description',
+      requiresRiskControl: true
+    }
+  }
+]
+
+
+/**
  * Create router instance
  */
 const router = createRouter({
@@ -718,8 +737,39 @@ const router = createRouter({
 })
 
 /**
- * Navigation guard: Authentication check
+ * 同步分发模式路由的注册状态。
+ *
+ * - `enabled = true`（分发模式）：注册所有 `distributionRoutes`。首次导航到某页面时
+ *   浏览器才会下载其 chunk（按需下载）。重复调用是幂等的（已注册则跳过）。
+ * - `enabled = false`（个人模式）：注销这些路由，使其从匹配器中消失。已注销的路由
+ *   即便被直接输入 URL 也只会命中 catch-all 404 / 被导航守卫重定向。
+ *
+ * 该函数在 `main.ts` 启动时（依据注入的 public settings）调用一次，并在管理员运行时
+ * 切换部署模式后再次调用，实现「分发模式下再下载、个人模式下结构性移除」。
  */
+const removeDistributionRoute = new Map<string, () => void>()
+
+export function syncDistributionRoutes(enabled: boolean): void {
+  if (enabled) {
+    for (const route of distributionRoutes) {
+      const name = route.name as string
+      if (!router.hasRoute(name)) {
+        // addRoute 返回一个移除回调，记录下来以便个人模式时注销。
+        const remove = router.addRoute(route)
+        removeDistributionRoute.set(name, remove)
+      }
+    }
+  } else {
+    for (const route of distributionRoutes) {
+      const name = route.name as string
+      if (router.hasRoute(name)) {
+        router.removeRoute(name)
+        removeDistributionRoute.delete(name)
+      }
+    }
+  }
+}
+
 let authInitialized = false
 
 // 初始化导航加载状态和预加载
@@ -900,6 +950,13 @@ router.beforeEach(async (to, _from, next) => {
       next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
       return
     }
+  }
+
+  // 个人模式：分发功能路由已被结构性移除（未注册）。此处兜底拦截直接 URL 访问，
+  // 重定向到仪表板而非停留在 404，给用户更友好的反馈。
+  if (isPersonalModeNow() && isDistributionPath(to.path)) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
   }
 
   // 简易模式下限制访问某些页面

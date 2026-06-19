@@ -100,6 +100,8 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		RiskControlEnabled: settings.RiskControlEnabled,
 
 		PrivacyFilterEnabled: settings.PrivacyFilterEnabled,
+
+		DeploymentMode: settings.DeploymentMode,
 	})
 }
 

@@ -79,6 +79,8 @@ type SetupConfig struct {
 	Server   ServerConfig   `json:"server" yaml:"server"`
 	JWT      JWTConfig      `json:"jwt" yaml:"jwt"`
 	Timezone string         `json:"timezone" yaml:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	// DeploymentMode 部署模式（personal/distribution），仅安装时写入 settings 表，不入配置文件。
+	DeploymentMode string `json:"deployment_mode" yaml:"-"`
 }
 
 type DatabaseConfig struct {
@@ -108,7 +110,6 @@ type ServerConfig struct {
 	Port int    `json:"port" yaml:"port"`
 	Mode string `json:"mode" yaml:"mode"`
 }
-
 type JWTConfig struct {
 	Secret     string `json:"secret" yaml:"secret"`
 	ExpireHour int    `json:"expire_hour" yaml:"expire_hour"`
@@ -308,6 +309,11 @@ func Install(cfg *SetupConfig) error {
 		return fmt.Errorf("admin user creation failed: %w", err)
 	}
 
+	// 写入部署模式设置（仅在安装时根据向导选择落库；缺省/非法值回落 distribution）。
+	if err := seedDeploymentMode(cfg); err != nil {
+		return fmt.Errorf("deployment mode initialization failed: %w", err)
+	}
+
 	// Write config file
 	if err := writeConfigFile(cfg); err != nil {
 		return fmt.Errorf("config file creation failed: %w", err)
@@ -426,6 +432,41 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 	return true, decision.reason, nil
+}
+
+// seedDeploymentMode 在安装阶段把向导选择的部署模式写入 settings 表。
+// 使用 upsert（ON CONFLICT (key) DO UPDATE）保证幂等；非法/空值归一化为 distribution。
+func seedDeploymentMode(cfg *SetupConfig) error {
+	mode := service.NormalizeDeploymentMode(cfg.DeploymentMode)
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User,
+		cfg.Database.Password, cfg.Database.DBName, cfg.Database.SSLMode,
+	)
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = db.ExecContext(
+		ctx,
+		`INSERT INTO settings (key, value, updated_at)
+		 VALUES ($1, $2, NOW())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+		service.SettingKeyDeploymentMode,
+		mode,
+	)
+	return err
 }
 
 func writeConfigFile(cfg *SetupConfig) error {

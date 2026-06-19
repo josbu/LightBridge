@@ -139,6 +139,43 @@ func TestOpsErrorLoggerMiddleware_DoesNotBreakOuterMiddlewares(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+// passthroughWrapWriter mimics an inner middleware (such as
+// PrivacyFilterResponseWriter) that wraps c.Writer and does NOT restore it,
+// keeping the wrapped writer alive after the request handler returns.
+type passthroughWrapWriter struct {
+	gin.ResponseWriter
+}
+
+// TestOpsErrorLoggerMiddleware_InnerWriterWrapper reproduces the production
+// panic: an inner middleware wraps the opsCaptureWriter, so the middleware's
+// defer must NOT nil/recycle the wrapped writer, otherwise outer middlewares
+// (Logger.Status / Recovery.Written) dereference a nil ResponseWriter.
+func TestOpsErrorLoggerMiddleware_InnerWriterWrapper(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	innerWrap := func(c *gin.Context) {
+		c.Writer = &passthroughWrapWriter{ResponseWriter: c.Writer}
+		c.Next()
+		// Intentionally does not restore c.Writer, like PrivacyFilterResponseWriter.
+	}
+
+	r := gin.New()
+	r.Use(middleware2.Recovery())
+	r.Use(middleware2.RequestLogger())
+	r.Use(middleware2.Logger())
+	r.GET("/v1/messages", OpsErrorLoggerMiddleware(nil), innerWrap, func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+
+	require.NotPanics(t, func() {
+		r.ServeHTTP(rec, req)
+	})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
 func TestIsKnownOpsErrorType(t *testing.T) {
 	known := []string{
 		"invalid_request_error",

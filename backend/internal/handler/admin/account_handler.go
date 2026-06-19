@@ -1868,8 +1868,14 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
-		// OpenAI 自动透传会绕过常规模型改写，测试/模型列表也应回落到默认模型集。
+		// OpenAI 自动透传会绕过常规模型改写：本地的默认模型列表对透传账号没有意义
+		// （上游可能是任意第三方端点），应改为从上游实时拉取真实支持的模型列表。
+		// 上游拉取失败时回落默认列表，保证测试连接功能不至于完全不可用。
 		if account.IsOpenAIPassthroughEnabled() {
+			if models, ok := h.upstreamModelsOrNil(c, account); ok {
+				response.Success(c, models)
+				return
+			}
 			response.Success(c, openai.DefaultModels)
 			return
 		}
@@ -2030,6 +2036,30 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"models": models})
+}
+
+// upstreamModelsOrNil 尝试从 OpenAI 透传账号的上游实时拉取真实支持的模型列表，
+// 并转换为与默认列表一致的 []openai.Model。仅当 accountTestService 已配置、上游
+// 拉取成功且返回非空时返回 (models, true)；否则返回 (nil, false)，由调用方回落到
+// openai.DefaultModels，保证上游暂时不可用时仍能展示 / 测试连接。
+func (h *AccountHandler) upstreamModelsOrNil(c *gin.Context, account *service.Account) ([]openai.Model, bool) {
+	if h.accountTestService == nil {
+		return nil, false
+	}
+	ids, err := h.accountTestService.FetchUpstreamSupportedModels(c.Request.Context(), account)
+	if err != nil || len(ids) == 0 {
+		return nil, false
+	}
+	models := make([]openai.Model, 0, len(ids))
+	for _, id := range ids {
+		models = append(models, openai.Model{
+			ID:          id,
+			Object:      "model",
+			Type:        "model",
+			DisplayName: id,
+		})
+	}
+	return models, true
 }
 
 // SetPrivacy handles setting privacy for a single OpenAI/Antigravity OAuth account

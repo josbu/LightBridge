@@ -227,6 +227,14 @@ export default {
       confirmPasswordPlaceholder: 'Confirm password',
       passwordMismatch: 'Passwords do not match'
     },
+    deploymentMode: {
+      label: 'Deployment Mode',
+      hint: 'Choose how this deployment will be used. You can switch anytime later in System Settings.',
+      distribution: 'Distribution Mode',
+      distributionHint: 'Keeps every feature (announcements, risk control, redeem/promo codes, subscriptions) — suited for offering API relay / distribution services.',
+      personal: 'Personal Mode',
+      personalHint: 'Streamlined UI with distribution features removed, keeping only what personal use needs.',
+    },
     ready: {
       title: 'Ready to Install',
       description: 'Review your configuration and complete setup',
@@ -3702,6 +3710,10 @@ export default {
       advancedMenu: 'Advanced',
       advancedMenuExpand: 'Expand',
       advancedMenuCollapse: 'Collapse',
+      personalMode: {
+        showOptional: 'Show more options',
+        hideOptional: 'Hide more options',
+      },
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',
@@ -5632,6 +5644,15 @@ export default {
           enabled: 'Enable Risk Control',
           enabledHint: 'When off, the admin sidebar entry is hidden and gateway moderation is skipped.',
         },
+        deploymentMode: {
+          title: 'Deployment Mode',
+          description: 'Switch between Personal and Distribution modes. Personal mode progressively removes distribution features (announcements, risk control, redeem codes, promo codes, subscriptions); their frontend code is no longer downloaded, keeping the UI focused on personal use.',
+          distribution: 'Distribution Mode',
+          distributionHint: 'Keeps every feature — suited for offering API relay / distribution services.',
+          personal: 'Personal Mode',
+          personalHint: 'Streamlined UI with only the features needed for personal use, simpler to operate.',
+          personalWarning: 'Switching to Personal mode removes the menus and pages for announcements, risk control, redeem codes, promo codes and subscriptions (backend data is preserved). Switch back to Distribution mode to restore them — the related code is re-downloaded on demand at that point.',
+        },
         privacyFilter: {
           title: 'Privacy Filter',
           description: 'Enable the privacy filter menu entry to redact sensitive data in requests and responses. Disabled by default.',
@@ -7121,6 +7142,58 @@ export default {
       keySubmit: {
         title: '🎉 Complete Creation',
         description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Click to confirm and create your API key.</p><div style="padding: 8px 12px; background: #fee2e2; border-left: 3px solid #ef4444; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚠️ Important:</b><ul style="margin: 8px 0 0 16px;"><li>Copy the key (sk-xxx) immediately after creation</li><li>Key is only shown once, need to regenerate if lost</li></ul></div><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>🚀 How to Use:</b><br/>Configure the key in any OpenAI-compatible client (like ChatBox, OpenCat, etc.) and start using!</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Create" button</p></div>'
+      }
+    },
+    personal: {
+      welcome: {
+        title: '👋 Welcome to LightBridge Personal Mode',
+        description: '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">Personal mode streamlines the UI down to two steps: connect an account, then create a key.</p><p style="margin-bottom: 12px;"><b>🎯 We will walk you through:</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🌐 Add an AI account</li><li>🔑 Create an API key</li><li>🚀 Start using it</li></ul><p style="color: #10b981; font-weight: 600;">Let\'s go through it together →</p></div>',
+        nextBtn: 'Start 🚀',
+        prevBtn: 'Skip'
+      },
+      accountManage: {
+        title: '🌐 Account Management',
+        description: '<div style="line-height: 1.7;"><p>Manage the AI accounts you connect (Claude, OpenAI, Gemini).</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Open the accounts page</p></div>'
+      },
+      createAccount: {
+        title: '➕ Add Account',
+        description: '<div style="line-height: 1.7;"><p>Click to add your first AI account.</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Add Account"</p></div>'
+      },
+      accountName: {
+        title: '✏️ Account Name',
+        description: '<div style="line-height: 1.7;"><p>Give the account a recognizable name, e.g. "My Claude".</p></div>',
+        nextBtn: 'Next'
+      },
+      accountPlatform: {
+        title: '🧩 Platform Type',
+        description: '<div style="line-height: 1.7;"><p>Pick the platform this account belongs to (Anthropic / OpenAI / Gemini / Custom).</p></div>',
+        nextBtn: 'Next'
+      },
+      accountType: {
+        title: '🔌 Add Method',
+        description: '<div style="line-height: 1.7;"><p>Choose how to connect credentials (API Key or OAuth). Other advanced options are collapsed in personal mode — defaults are fine.</p></div>',
+        nextBtn: 'Next'
+      },
+      accountGroups: {
+        title: '🎯 Group',
+        description: '<div style="line-height: 1.7;"><p>Add the account to a group; keys are scheduled to this account through the group.</p></div>',
+        nextBtn: 'Next'
+      },
+      accountSubmit: {
+        title: '✅ Save Account',
+        description: '<div style="line-height: 1.7;"><p>Confirm to save the account.</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Save"</p></div>'
+      },
+      keyManage: {
+        title: '🔑 Key Management',
+        description: '<div style="line-height: 1.7;"><p>Once the account is connected, create a calling key here.</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Open the keys page</p></div>'
+      },
+      createKey: {
+        title: '➕ Create Key',
+        description: '<div style="line-height: 1.7;"><p>Click to create an API key.</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Create Key"</p></div>'
+      },
+      keySubmit: {
+        title: '🎉 Done',
+        description: '<div style="line-height: 1.7;"><p>After confirming, copy the key immediately (shown only once). Configure it into any OpenAI-compatible client to start using.</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 Click "Create"</p></div>'
       }
     }
   },

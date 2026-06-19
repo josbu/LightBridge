@@ -227,6 +227,8 @@ type InstallRequest struct {
 	Redis    RedisConfig    `json:"redis" binding:"required"`
 	Admin    AdminConfig    `json:"admin" binding:"required"`
 	Server   ServerConfig   `json:"server"`
+	// DeploymentMode 部署模式（personal/distribution），可选；缺省 distribution。
+	DeploymentMode string `json:"deployment_mode"`
 }
 
 // install performs the installation
@@ -333,6 +335,7 @@ func install(c *gin.Context) {
 		JWT: JWTConfig{
 			ExpireHour: 24,
 		},
+		DeploymentMode: req.DeploymentMode,
 	}
 
 	if err := Install(cfg); err != nil {

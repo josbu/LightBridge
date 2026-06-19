@@ -223,6 +223,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { useDeploymentMode } from '@/composables/useDeploymentMode'
 
 interface NavItem {
   path: string
@@ -693,6 +694,16 @@ const flagPrivacyFilter = makeSidebarFlag(FeatureFlags.privacyFilter)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 
+// 个人模式下，分发相关菜单（公告/风控/兑换码/优惠码/订阅）随对应路由一并结构性移除。
+// distributionFlag 返回 false 即从菜单过滤掉该项（与路由注销保持一致）。
+const { isDistributionMode } = useDeploymentMode()
+const flagDistribution = () => isDistributionMode.value
+
+// combineFlags：所有子开关都「非 false」才显示（沿用 NavItem.featureFlag 的宽容语义）。
+function combineFlags(...flags: Array<() => boolean | undefined>): () => boolean {
+  return () => flags.every((f) => f() !== false)
+}
+
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
 //
@@ -708,10 +719,10 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
-    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagDistribution },
     { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
+    { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagDistribution },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
@@ -770,15 +781,15 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagDistribution },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/modules', label: t('nav.modules'), icon: ServerIcon },
-    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
+    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon, featureFlag: flagDistribution },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
-    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
+    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: combineFlags(flagRiskControl, flagDistribution) },
     { path: '/admin/privacy-filter', label: t('nav.privacyFilter'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagPrivacyFilter },
-    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
-    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
+    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true, featureFlag: flagDistribution },
+    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagDistribution },
     {
       path: '/admin/affiliates',
       label: t('nav.affiliateManagement'),

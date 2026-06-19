@@ -234,6 +234,8 @@ export interface PublicSettings {
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
   affiliate_enabled: boolean
+  /** 部署模式：personal（个人）/ distribution（分发）。缺省视为 distribution */
+  deployment_mode?: 'personal' | 'distribution' | string
 }
 
 export interface AuthResponse {

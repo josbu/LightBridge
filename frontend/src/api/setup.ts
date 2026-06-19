@@ -50,6 +50,8 @@ export interface InstallRequest {
   redis: RedisConfig
   admin: AdminConfig
   server: ServerConfig
+  /** 部署模式：personal（个人）/ distribution（分发）。缺省 distribution */
+  deployment_mode?: 'personal' | 'distribution'
 }
 
 export interface InstallResponse {

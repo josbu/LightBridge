@@ -244,6 +244,124 @@ export const getAdminSteps = (t: (key: string) => string, isSimpleMode = false):
 }
 
 /**
+ * 个人模式引导流程
+ *
+ * 个人模式聚焦「快速创建账户 → 创建密钥」这条最短路径，跳过分发相关的引导（分组策略、
+ * 优先级、配额等），与账户表单的字段折叠保持一致——只引导名称/平台/添加方式/分组等必需项。
+ */
+export const getPersonalSteps = (t: (key: string) => string): DriveStep[] => [
+  {
+    popover: {
+      title: t('onboarding.personal.welcome.title'),
+      description: t('onboarding.personal.welcome.description'),
+      align: 'center',
+      nextBtnText: t('onboarding.personal.welcome.nextBtn'),
+      prevBtnText: t('onboarding.personal.welcome.prevBtn')
+    }
+  },
+  {
+    element: '#sidebar-channel-manage',
+    popover: {
+      title: t('onboarding.personal.accountManage.title'),
+      description: t('onboarding.personal.accountManage.description'),
+      side: 'right',
+      align: 'center',
+      showButtons: ['close']
+    }
+  },
+  {
+    element: '[data-tour="accounts-create-btn"]',
+    popover: {
+      title: t('onboarding.personal.createAccount.title'),
+      description: t('onboarding.personal.createAccount.description'),
+      side: 'bottom',
+      align: 'end',
+      showButtons: ['close']
+    }
+  },
+  {
+    element: '[data-tour="account-form-name"]',
+    popover: {
+      title: t('onboarding.personal.accountName.title'),
+      description: t('onboarding.personal.accountName.description'),
+      side: 'right',
+      align: 'start',
+      showButtons: ['next', 'previous']
+    }
+  },
+  {
+    element: '[data-tour="account-form-platform"]',
+    popover: {
+      title: t('onboarding.personal.accountPlatform.title'),
+      description: t('onboarding.personal.accountPlatform.description'),
+      side: 'right',
+      align: 'start',
+      showButtons: ['next', 'previous']
+    }
+  },
+  {
+    element: '[data-tour="account-form-type"]',
+    popover: {
+      title: t('onboarding.personal.accountType.title'),
+      description: t('onboarding.personal.accountType.description'),
+      side: 'right',
+      align: 'start',
+      showButtons: ['next', 'previous']
+    }
+  },
+  {
+    element: '[data-tour="account-form-groups"]',
+    popover: {
+      title: t('onboarding.personal.accountGroups.title'),
+      description: t('onboarding.personal.accountGroups.description'),
+      side: 'top',
+      align: 'center',
+      showButtons: ['next', 'previous']
+    }
+  },
+  {
+    element: '[data-tour="account-form-submit"]',
+    popover: {
+      title: t('onboarding.personal.accountSubmit.title'),
+      description: t('onboarding.personal.accountSubmit.description'),
+      side: 'left',
+      align: 'center',
+      showButtons: ['close']
+    }
+  },
+  {
+    element: '[data-tour="sidebar-my-keys"]',
+    popover: {
+      title: t('onboarding.personal.keyManage.title'),
+      description: t('onboarding.personal.keyManage.description'),
+      side: 'right',
+      align: 'center',
+      showButtons: ['close']
+    }
+  },
+  {
+    element: '[data-tour="keys-create-btn"]',
+    popover: {
+      title: t('onboarding.personal.createKey.title'),
+      description: t('onboarding.personal.createKey.description'),
+      side: 'bottom',
+      align: 'end',
+      showButtons: ['close']
+    }
+  },
+  {
+    element: '[data-tour="key-form-submit"]',
+    popover: {
+      title: t('onboarding.personal.keySubmit.title'),
+      description: t('onboarding.personal.keySubmit.description'),
+      side: 'left',
+      align: 'center',
+      showButtons: ['close']
+    }
+  }
+]
+
+/**
  * 普通用户引导流程
  */
 export const getUserSteps = (t: (key: string) => string): DriveStep[] => [

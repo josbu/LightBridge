@@ -227,6 +227,14 @@ export default {
       confirmPasswordPlaceholder: '确认密码',
       passwordMismatch: '密码不匹配'
     },
+    deploymentMode: {
+      label: '部署模式',
+      hint: '选择本次部署的使用场景。安装后可在「系统设置」中随时切换。',
+      distribution: '分发模式',
+      distributionHint: '保留全部功能（公告、风控、兑换码、优惠码、订阅等），适合对外提供 API 中转 / 分发服务。',
+      personal: '个人模式',
+      personalHint: '精简界面，移除分发相关功能，仅保留个人自用所需，操作更简单。',
+    },
     ready: {
       title: '准备安装',
       description: '检查您的配置并完成安装',
@@ -3840,6 +3848,10 @@ export default {
       advancedMenu: '高级设置',
       advancedMenuExpand: '展开',
       advancedMenuCollapse: '收起',
+      personalMode: {
+        showOptional: '显示更多选项',
+        hideOptional: '收起更多选项',
+      },
       concurrency: '并发数',
       loadFactor: '负载因子',
       loadFactorHint: '提高负载因子可以提高对账号的调度频率',
@@ -5792,6 +5804,15 @@ export default {
           enabled: '启用风控中心',
           enabledHint: '关闭后管理员侧边栏入口隐藏，网关内容审计不会执行。',
         },
+        deploymentMode: {
+          title: '部署模式',
+          description: '在「个人」与「分发」两种模式间切换。个人模式会渐进式移除分发相关功能（公告、风控、兑换码、优惠码、订阅），相关前端代码不再下载，让界面更聚焦个人使用。',
+          distribution: '分发模式',
+          distributionHint: '保留全部功能，适合对外提供 API 中转 / 分发服务。',
+          personal: '个人模式',
+          personalHint: '精简界面，仅保留个人自用所需功能，操作更简单。',
+          personalWarning: '切换到个人模式后，公告、风控、兑换码、优惠码、订阅等分发功能的菜单与页面将被移除（数据仍保留在后端）。切回分发模式即可恢复，相关功能代码届时按需重新下载。',
+        },
         privacyFilter: {
           title: '隐私过滤',
           description: '启用隐私过滤菜单入口，对请求和响应中的敏感信息脱敏。默认关闭。',
@@ -7301,6 +7322,59 @@ export default {
         title: '🎉 完成创建',
         description:
           '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">点击确认创建您的 API 密钥。</p><div style="padding: 8px 12px; background: #fee2e2; border-left: 3px solid #ef4444; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚠️ 重要：</b><ul style="margin: 8px 0 0 16px;"><li>创建后请立即复制密钥（sk-xxx）</li><li>密钥只显示一次，丢失需重新生成</li></ul></div><p style="padding: 8px 12px; background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 4px; font-size: 13px;"><b>🚀 如何使用：</b><br/>将密钥配置到支持 OpenAI 接口的任何客户端（如 ChatBox、OpenCat 等），即可开始使用！</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"创建"按钮</p></div>'
+      }
+    },
+    personal: {
+      welcome: {
+        title: '👋 欢迎使用 LightBridge 个人模式',
+        description:
+          '<div style="line-height: 1.8;"><p style="margin-bottom: 16px;">个人模式已为您精简界面，专注「接入账户 → 创建密钥」两步即可使用。</p><p style="margin-bottom: 12px;"><b>🎯 我们将带您：</b></p><ul style="margin-left: 20px; margin-bottom: 16px;"><li>🌐 添加一个 AI 账户</li><li>🔑 创建调用密钥</li><li>🚀 开始使用</li></ul><p style="color: #10b981; font-weight: 600;">跟着引导走一遍吧 →</p></div>',
+        nextBtn: '开始 🚀',
+        prevBtn: '跳过'
+      },
+      accountManage: {
+        title: '🌐 账户管理',
+        description: '<div style="line-height: 1.7;"><p>这里管理您接入的 AI 账户（如 Claude、OpenAI、Gemini）。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击进入账户页面</p></div>'
+      },
+      createAccount: {
+        title: '➕ 添加账户',
+        description: '<div style="line-height: 1.7;"><p>点击按钮添加您的第一个 AI 账户。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"添加账户"</p></div>'
+      },
+      accountName: {
+        title: '✏️ 账户名称',
+        description: '<div style="line-height: 1.7;"><p>给账户起一个便于识别的名称，例如「我的 Claude」。</p></div>',
+        nextBtn: '下一步'
+      },
+      accountPlatform: {
+        title: '🧩 平台类型',
+        description: '<div style="line-height: 1.7;"><p>选择该账户所属的平台（Anthropic / OpenAI / Gemini / 自定义）。</p></div>',
+        nextBtn: '下一步'
+      },
+      accountType: {
+        title: '🔌 添加方式',
+        description: '<div style="line-height: 1.7;"><p>选择凭证接入方式（如 API Key 或 OAuth 授权）。个人模式下其余高级选项已折叠，保持默认即可。</p></div>',
+        nextBtn: '下一步'
+      },
+      accountGroups: {
+        title: '🎯 分组',
+        description: '<div style="line-height: 1.7;"><p>把账户加入一个分组，密钥将通过分组调度到此账户。</p></div>',
+        nextBtn: '下一步'
+      },
+      accountSubmit: {
+        title: '✅ 保存账户',
+        description: '<div style="line-height: 1.7;"><p>确认后即可保存账户。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"保存"</p></div>'
+      },
+      keyManage: {
+        title: '🔑 密钥管理',
+        description: '<div style="line-height: 1.7;"><p>账户接入后，在这里创建调用密钥。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击进入密钥页面</p></div>'
+      },
+      createKey: {
+        title: '➕ 创建密钥',
+        description: '<div style="line-height: 1.7;"><p>点击创建一个 API 密钥。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"创建密钥"</p></div>'
+      },
+      keySubmit: {
+        title: '🎉 完成',
+        description: '<div style="line-height: 1.7;"><p>确认创建密钥后，立即复制保存（只显示一次）。把它配置到任意兼容 OpenAI 接口的客户端即可开始使用。</p><p style="margin-top: 12px; color: #10b981; font-weight: 600;">👉 点击"创建"</p></div>'
       }
     }
   },

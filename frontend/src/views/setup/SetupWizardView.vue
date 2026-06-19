@@ -337,6 +337,50 @@
               {{ t('setup.admin.passwordMismatch') }}
             </p>
           </div>
+
+          <!-- 部署模式选择：个人 / 分发 -->
+          <div class="border-t border-gray-200 pt-5 dark:border-dark-600">
+            <label class="input-label">{{ t('setup.deploymentMode.label') }}</label>
+            <p class="mb-3 mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('setup.deploymentMode.hint') }}
+            </p>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                @click="formData.deployment_mode = 'distribution'"
+                :class="[
+                  'rounded-lg border p-4 text-left transition-all',
+                  formData.deployment_mode !== 'personal'
+                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500 dark:bg-primary-900/20'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-dark-600'
+                ]"
+              >
+                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('setup.deploymentMode.distribution') }}
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('setup.deploymentMode.distributionHint') }}
+                </p>
+              </button>
+              <button
+                type="button"
+                @click="formData.deployment_mode = 'personal'"
+                :class="[
+                  'rounded-lg border p-4 text-left transition-all',
+                  formData.deployment_mode === 'personal'
+                    ? 'border-primary-500 bg-primary-50 ring-1 ring-primary-500 dark:bg-primary-900/20'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-dark-600'
+                ]"
+              >
+                <div class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('setup.deploymentMode.personal') }}
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('setup.deploymentMode.personalHint') }}
+                </p>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Step 4: Complete -->
@@ -553,7 +597,8 @@ const formData = reactive<InstallRequest>({
     host: '0.0.0.0',
     port: getCurrentPort(), // Use current port from browser
     mode: 'release'
-  }
+  },
+  deployment_mode: 'distribution'
 })
 
 const canProceed = computed(() => {

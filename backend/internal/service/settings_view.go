@@ -188,6 +188,9 @@ type SystemSettings struct {
 	// Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	BackendModeEnabled bool
 
+	// 部署模式：personal（个人）/ distribution（分发）。个人模式渐进式移除分发相关功能
+	DeploymentMode string
+
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       bool   // 是否统一 OAuth 账号的指纹头（默认 true）
 	EnableMetadataPassthrough          bool   // 是否透传客户端原始 metadata（默认 false）
@@ -297,6 +300,9 @@ type PublicSettings struct {
 
 	// 隐私过滤功能开关
 	PrivacyFilterEnabled bool `json:"privacy_filter_enabled"`
+
+	// 部署模式：personal（个人）/ distribution（分发）。驱动前端结构性移除分发功能
+	DeploymentMode string `json:"deployment_mode"`
 }
 
 type LoginAgreementDocument struct {

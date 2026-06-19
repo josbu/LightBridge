@@ -142,6 +142,21 @@ const WeChatConnectSyntheticEmailDomain = "@wechat-connect.invalid"
 // DingTalkConnectSyntheticEmailDomain 是 DingTalk Connect 用户的合成邮箱后缀（RFC 保留域名）。
 const DingTalkConnectSyntheticEmailDomain = "@dingtalk-connect.invalid"
 
+// 部署模式取值。个人模式（personal）会渐进式移除公告/风控/兑换码/优惠码/订阅等分发相关功能，
+// 分发模式（distribution）保留全部功能。默认 distribution 以保持向后兼容。
+const (
+	DeploymentModePersonal     = "personal"
+	DeploymentModeDistribution = "distribution"
+)
+
+// NormalizeDeploymentMode 将任意输入归一化为合法的部署模式，非法/空值回落到 distribution。
+func NormalizeDeploymentMode(v string) string {
+	if v == DeploymentModePersonal {
+		return DeploymentModePersonal
+	}
+	return DeploymentModeDistribution
+}
+
 // Setting keys
 const (
 	// 注册设置
@@ -165,6 +180,7 @@ const (
 	SettingKeyLoginAgreementMode               = "login_agreement_mode"                // 条款确认展示模式：modal / checkbox
 	SettingKeyLoginAgreementUpdatedAt          = "login_agreement_updated_at"          // 条款更新日期（展示用）
 	SettingKeyLoginAgreementDocuments          = "login_agreement_documents"           // 条款文档列表（JSON，Markdown 内容）
+	SettingKeyDeploymentMode                   = "deployment_mode"                     // 部署模式：personal（个人）/ distribution（分发）。个人模式渐进式移除分发相关功能
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址

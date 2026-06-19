@@ -762,6 +762,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyPrivacyFilterEnabled,
+		SettingKeyDeploymentMode,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -875,6 +876,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		RiskControlEnabled:   settings[SettingKeyRiskControlEnabled] == "true",
 		PrivacyFilterEnabled: settings[SettingKeyPrivacyFilterEnabled] == "true",
+
+		DeploymentMode: NormalizeDeploymentMode(settings[SettingKeyDeploymentMode]),
 	}, nil
 }
 
@@ -1178,6 +1181,7 @@ type PublicSettingsInjectionPayload struct {
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
 	PrivacyFilterEnabled                 bool `json:"privacy_filter_enabled"`
+	DeploymentMode                       string `json:"deployment_mode"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -1241,6 +1245,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		PrivacyFilterEnabled:                 settings.PrivacyFilterEnabled,
+		DeploymentMode:                       NormalizeDeploymentMode(settings.DeploymentMode),
 	}, nil
 }
 
@@ -1884,6 +1889,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRiskControlEnabled] = strconv.FormatBool(settings.RiskControlEnabled)
 	// 隐私过滤功能开关
 	updates[SettingKeyPrivacyFilterEnabled] = strconv.FormatBool(settings.PrivacyFilterEnabled)
+
+	// 部署模式：personal / distribution（归一化非法值）
+	updates[SettingKeyDeploymentMode] = NormalizeDeploymentMode(settings.DeploymentMode)
 
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
@@ -2809,6 +2817,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 隐私过滤功能（默认关闭，显式启用）
 		SettingKeyPrivacyFilterEnabled: "false",
 
+		// 部署模式（默认分发模式，保持向后兼容）
+		SettingKeyDeploymentMode: DeploymentModeDistribution,
+
 		// Claude Code version check (default: empty = disabled)
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
@@ -3317,6 +3328,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.RiskControlEnabled = settings[SettingKeyRiskControlEnabled] == "true"
 	// 隐私过滤功能（默认关闭，严格 true 才启用）
 	result.PrivacyFilterEnabled = settings[SettingKeyPrivacyFilterEnabled] == "true"
+
+	// 部署模式（默认 distribution；非法/空值归一化）
+	result.DeploymentMode = NormalizeDeploymentMode(settings[SettingKeyDeploymentMode])
 
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]

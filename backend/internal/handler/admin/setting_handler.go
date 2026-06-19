@@ -229,6 +229,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		DefaultBalance:                         settings.DefaultBalance,
 		RiskControlEnabled:                     settings.RiskControlEnabled,
 		PrivacyFilterEnabled:                   settings.PrivacyFilterEnabled,
+		DeploymentMode:                         settings.DeploymentMode,
 		AffiliateRebateRate:                    settings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:             settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            settings.AffiliateRebateDurationDays,
@@ -647,6 +648,9 @@ type UpdateSettingsRequest struct {
 
 	// 隐私过滤功能开关
 	PrivacyFilterEnabled *bool `json:"privacy_filter_enabled"`
+
+	// 部署模式：personal（个人）/ distribution（分发）
+	DeploymentMode *string `json:"deployment_mode"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -1769,6 +1773,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.PrivacyFilterEnabled
 		}(),
+		DeploymentMode: func() string {
+			if req.DeploymentMode != nil {
+				return service.NormalizeDeploymentMode(*req.DeploymentMode)
+			}
+			return previousSettings.DeploymentMode
+		}(),
 	}
 
 	// req.AuthSourceXxxPlatformQuotas 为 nil 表示本次请求未包含该 source 的 quota 配置（保留 previousAuthSourceDefaults 中的值）；
@@ -2092,6 +2102,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		RiskControlEnabled: updatedSettings.RiskControlEnabled,
 		PrivacyFilterEnabled: updatedSettings.PrivacyFilterEnabled,
+		DeploymentMode: updatedSettings.DeploymentMode,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
@@ -2574,6 +2585,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.PrivacyFilterEnabled != after.PrivacyFilterEnabled {
 		changed = append(changed, "privacy_filter_enabled")
+	}
+	if before.DeploymentMode != after.DeploymentMode {
+		changed = append(changed, "deployment_mode")
 	}
 	// Default platform quotas（JSON map，整体比较）
 	if !equalPlatformQuotaSettings(before.DefaultPlatformQuotas, after.DefaultPlatformQuotas) {

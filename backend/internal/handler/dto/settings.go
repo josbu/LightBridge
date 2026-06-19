@@ -247,6 +247,9 @@ type SystemSettings struct {
 	// 隐私过滤功能开关
 	PrivacyFilterEnabled bool `json:"privacy_filter_enabled"`
 
+	// 部署模式：personal（个人）/ distribution（分发）
+	DeploymentMode string `json:"deployment_mode"`
+
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
@@ -321,6 +324,9 @@ type PublicSettings struct {
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
 	PrivacyFilterEnabled bool `json:"privacy_filter_enabled"`
+
+	// 部署模式：personal（个人）/ distribution（分发），驱动前端结构性移除分发功能
+	DeploymentMode string `json:"deployment_mode"`
 }
 
 type LoginAgreementDocument struct {

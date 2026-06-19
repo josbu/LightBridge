@@ -2008,7 +2008,7 @@
 
       <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
       <div
-        v-if="form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock')"
+        v-if="showOptionalSections && form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2060,7 +2060,7 @@
 
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
       <div
-        v-else-if="form.type === 'apikey' || form.type === 'bedrock'"
+        v-else-if="showOptionalSections && (form.type === 'apikey' || form.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2428,7 +2428,7 @@
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
-        v-if="form.platform === 'anthropic' && accountCategory === 'oauth-based'"
+        v-if="showOptionalSections && form.platform === 'anthropic' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2807,7 +2807,7 @@
       </div>
 
       <!-- 高级菜单：将代理、过期时间、并发数、负载因子、优先级、计费倍率统一折叠 -->
-      <div class="rounded-xl border border-gray-200 dark:border-dark-600">
+      <div v-if="showOptionalSections" class="rounded-xl border border-gray-200 dark:border-dark-600">
         <button
           type="button"
           @click="showAdvancedMenu = !showAdvancedMenu"
@@ -3208,6 +3208,25 @@
           </div>
         </div>
 
+        <!-- 个人模式：展开/收起 名称/备注/平台/添加方式/分组 以外的非必需选项 -->
+        <button
+          v-if="isPersonalMode"
+          type="button"
+          @click="showPersonalOptional = !showPersonalOptional"
+          class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700"
+        >
+          <svg
+            :class="['h-4 w-4 transition-transform', showPersonalOptional ? 'rotate-180' : '']"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+          {{ showPersonalOptional ? t('admin.accounts.personalMode.hideOptional') : t('admin.accounts.personalMode.showOptional') }}
+        </button>
+
         <!-- Group Selection - 仅标准模式显示 -->
         <GroupSelector
           v-if="!authStore.isSimpleMode"
@@ -3567,6 +3586,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useDeploymentMode } from '@/composables/useDeploymentMode'
 import {
   claudeModels,
   getPresetMappingsByPlatform,
@@ -3935,6 +3955,13 @@ const antigravityMixedChannelConfirmed = ref(false)
 const showAdvancedOAuth = ref(false)
 const showGeminiHelpDialog = ref(false)
 const showAdvancedMenu = ref(false)
+
+// 个人模式：把名称/备注/平台/添加方式/分组 以外的非必需选项（配额控制、代理/有效期/
+// 并发等高级菜单）折叠起来，默认隐藏。用户点击「显示更多选项」可临时展开。
+const { isPersonalMode } = useDeploymentMode()
+const showPersonalOptional = ref(false)
+// 这些「可选」区块在个人模式下默认折叠：仅当非个人模式、或用户已展开时才渲染。
+const showOptionalSections = computed(() => !isPersonalMode.value || showPersonalOptional.value)
 
 // Quota control state (Anthropic OAuth/SetupToken only)
 const windowCostEnabled = ref(false)

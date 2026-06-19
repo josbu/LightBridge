@@ -489,12 +489,21 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		originalWriter := c.Writer
 		w := acquireOpsCaptureWriter(originalWriter)
 		defer func() {
-			// Restore the original writer before returning so outer middlewares
-			// don't observe a pooled wrapper that has been released.
 			if c.Writer == w {
+				// No inner middleware wrapped our writer, so we can cleanly
+				// detach it and recycle it into the pool.
 				c.Writer = originalWriter
+				releaseOpsCaptureWriter(w)
+				return
 			}
-			releaseOpsCaptureWriter(w)
+			// An inner middleware (e.g. PrivacyFilterResponseWriter) wrapped our
+			// writer and still embeds it as its ResponseWriter. Outer middlewares
+			// (Logger/Recovery) keep calling methods through that wrapper after we
+			// return, so we MUST NOT nil out w or return it to the pool here —
+			// doing so left a dangling *opsCaptureWriter whose ResponseWriter was
+			// nil, causing a nil-pointer panic in c.Writer.Status()/Written()
+			// (and a sync.Pool data race). Leave it live; it is GC'd together with
+			// the wrapping writer when the request completes.
 		}()
 		c.Writer = w
 		c.Next()
