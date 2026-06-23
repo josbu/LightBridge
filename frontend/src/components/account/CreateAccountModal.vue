@@ -1348,24 +1348,10 @@
             </p>
           </div>
         </div>
-        <!-- 常规 APIKey（OpenAI / Gemini 官方 / Anthropic） -->
+        <!-- 常规 APIKey（OpenAI / Gemini 官方 / Anthropic）：
+             内置 Provider 固定使用官方地址（base_url 由提交逻辑按平台默认值填充），
+             不再暴露 BaseURL 输入框。需要自定义上游地址请使用 Custom Provider。 -->
         <template v-else>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
-          <input
-            v-model="apiKeyBaseUrl"
-            type="text"
-            class="input"
-            :placeholder="
-              form.platform === 'openai'
-                ? 'https://api.openai.com'
-                : form.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : 'https://api.anthropic.com'
-            "
-          />
-          <p class="input-hint">{{ baseUrlHint }}</p>
-        </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
@@ -3679,13 +3665,6 @@ const oauthStepTitle = computed(() => {
   if (form.platform === 'gemini') return t('admin.accounts.oauth.gemini.title')
   if (form.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.title')
   return t('admin.accounts.oauth.title')
-})
-
-// Platform-specific hints for API Key type
-const baseUrlHint = computed(() => {
-  if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
-  if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  return t('admin.accounts.baseUrlHint')
 })
 
 const apiKeyHint = computed(() => {

@@ -37,29 +37,18 @@
             {{ t('admin.accounts.gemini.proxyManagedHint') }}
           </p>
         </div>
-        <div>
+        <!-- BaseURL：内置 Provider（官方 apikey 模式）固定官方地址，不再可编辑；
+             仅 Gemini 反代账号需要填写反代主机地址，故保留输入框。
+             需要自定义上游地址请改用 Custom Provider。 -->
+        <div v-if="isGeminiProxyAccount">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              account.platform === 'openai'
-                ? 'https://api.openai.com'
-                : account.platform === 'gemini' && isGeminiProxyAccount
-                  ? 'http://your-aistudio-api-host:8080'
-                  : account.platform === 'gemini'
-                    ? 'https://generativelanguage.googleapis.com'
-                    : account.platform === 'antigravity'
-                      ? 'https://cloudcode-pa.googleapis.com'
-                      : 'https://api.anthropic.com'
-            "
+            :placeholder="'http://your-aistudio-api-host:8080'"
           />
-          <p class="input-hint">{{
-            account.platform === 'gemini' && isGeminiProxyAccount
-              ? t('admin.accounts.gemini.proxyBaseUrlHint')
-              : baseUrlHint
-          }}</p>
+          <p class="input-hint">{{ t('admin.accounts.gemini.proxyBaseUrlHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
@@ -2495,13 +2484,6 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
-// Platform-specific hint for Base URL
-const baseUrlHint = computed(() => {
-  if (!props.account) return t('admin.accounts.baseUrlHint')
-  if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
-  if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  return t('admin.accounts.baseUrlHint')
-})
 
 // 是否为 AIStudio 反代（Bearer）账号：Gemini 平台 + APIKey + auth_header==bearer。
 const isGeminiProxyAccount = computed(() => {

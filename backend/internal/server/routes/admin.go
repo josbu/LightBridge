@@ -351,6 +351,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.GET("/antigravity/default-model-mapping", h.Admin.Account.GetAntigravityDefaultModelMapping)
 
 		// LightBridge Connect (New API deep integration)
+		// 批量余额查询为静态路径，与 /:id 同级（参考 /data、/batch 等既有静态兄弟路由）。
+		accounts.POST("/lightbridge-connect/batch-balances", h.Admin.LightBridgeConnect.BatchBalances)
 		lbc := accounts.Group("/:id/lightbridge-connect")
 		{
 			lbc.POST("/verify-token", h.Admin.LightBridgeConnect.VerifyToken)

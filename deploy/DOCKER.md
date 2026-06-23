@@ -10,7 +10,7 @@ docker run -d \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host:5432/LightBridge" \
   -e REDIS_URL="redis://host:6379" \
-  weishaw/LightBridge:latest
+  williamwang1721/lightbridge:latest
 ```
 
 ## Docker Compose
@@ -20,7 +20,7 @@ version: '3.8'
 
 services:
   LightBridge:
-    image: weishaw/LightBridge:latest
+    image: williamwang1721/lightbridge:latest
     ports:
       - "8080:8080"
     environment:

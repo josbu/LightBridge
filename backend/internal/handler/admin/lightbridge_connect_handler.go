@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/WilliamWang1721/LightBridge/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 // LightBridgeConnectHandler handles LightBridge Connect operations
@@ -22,6 +24,111 @@ func NewLightBridgeConnectHandler(lbcService *service.LightBridgeConnectService,
 		lbcService: lbcService,
 		db:         db,
 	}
+}
+
+// BatchBalanceItem 表示单个账号的 LightBridge Connect 余额快照（用于账号列表展示）。
+type BatchBalanceItem struct {
+	AccountID   int64   `json:"account_id"`
+	InstanceURL string  `json:"instance_url"`
+	Balance     int64   `json:"balance"`  // 余额（分）
+	Used        int64   `json:"used"`     // 已使用（分）
+	Currency    string  `json:"currency"` // CNY / USD ...
+	LastSyncAt  *string `json:"last_sync_at,omitempty"`
+}
+
+// BatchBalanceRequest 批量查询账号余额的请求体。
+type BatchBalanceRequest struct {
+	AccountIDs []int64 `json:"account_ids" binding:"required"`
+}
+
+// BatchBalances 批量返回若干账号已缓存的 LightBridge Connect 余额。
+// 余额由后台 LightBridgeConnectSyncService 周期性写入 accounts.lightbridge_connect
+// JSONB 列，这里只做读取，避免列表渲染时同步阻塞。
+// POST /api/v1/admin/accounts/lightbridge-connect/batch-balances
+func (h *LightBridgeConnectHandler) BatchBalances(c *gin.Context) {
+	var req BatchBalanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+
+	result := make([]BatchBalanceItem, 0, len(req.AccountIDs))
+	if len(req.AccountIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"balances": result})
+		return
+	}
+
+	// 去重，避免重复 ID 扩大查询。
+	seen := make(map[int64]struct{}, len(req.AccountIDs))
+	ids := make([]int64, 0, len(req.AccountIDs))
+	for _, id := range req.AccountIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	rows, err := h.db.QueryContext(c.Request.Context(), `
+		SELECT id, lightbridge_connect
+		FROM accounts
+		WHERE deleted_at IS NULL
+		  AND lightbridge_connect IS NOT NULL
+		  AND lightbridge_connect::text != 'null'
+		  AND id = ANY($1)
+	`, pq.Array(ids))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var accountID int64
+		var configJSON sql.NullString
+		if err := rows.Scan(&accountID, &configJSON); err != nil {
+			continue
+		}
+		if !configJSON.Valid || configJSON.String == "" {
+			continue
+		}
+
+		var config service.LightBridgeConnectConfig
+		if err := json.Unmarshal([]byte(configJSON.String), &config); err != nil {
+			continue
+		}
+		if config.Quota == nil {
+			// 尚未同步过余额：仍返回 instance_url，供前端拼控制台入口。
+			result = append(result, BatchBalanceItem{
+				AccountID:   accountID,
+				InstanceURL: config.InstanceURL,
+				Currency:    "CNY",
+			})
+			continue
+		}
+
+		item := BatchBalanceItem{
+			AccountID:   accountID,
+			InstanceURL: config.InstanceURL,
+			Balance:     config.Quota.Balance,
+			Used:        config.Quota.Used,
+			Currency:    config.Quota.Currency,
+		}
+		if item.Currency == "" {
+			item.Currency = "CNY"
+		}
+		if config.Quota.LastSyncAt != nil {
+			s := config.Quota.LastSyncAt.Format(time.RFC3339)
+			item.LastSyncAt = &s
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"balances": result})
 }
 
 // VerifyTokenRequest represents the verification request

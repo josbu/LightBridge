@@ -9,6 +9,7 @@ export interface ReleaseInfo {
   body: string
   published_at: string
   html_url: string
+  prerelease?: boolean
 }
 
 export interface VersionRelease {

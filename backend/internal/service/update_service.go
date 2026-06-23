@@ -99,6 +99,7 @@ type ReleaseInfo struct {
 	Body        string  `json:"body"`
 	PublishedAt string  `json:"published_at"`
 	HTMLURL     string  `json:"html_url"`
+	Prerelease  bool    `json:"prerelease"`
 	Assets      []Asset `json:"assets,omitempty"`
 }
 
@@ -206,26 +207,13 @@ func (s *UpdateService) PerformUpdateToVersion(ctx context.Context, targetVersio
 		return ErrNoUpdateAvailable
 	}
 
-	// Find matching archive and checksum for current platform
-	archiveName := s.getArchiveName()
-	var downloadURL string
-	var checksumURL string
-
-	for _, asset := range info.ReleaseInfo.Assets {
-		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
-			downloadURL = asset.DownloadURL
-		}
-		if asset.Name == "checksums.txt" {
-			checksumURL = asset.DownloadURL
-		}
-	}
-
-	if downloadURL == "" {
+	asset, checksumURL, directBinary := s.selectUpdateAsset(info)
+	if asset == nil {
 		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	// SECURITY: Validate download URL is from trusted domain
-	if err := validateDownloadURL(downloadURL); err != nil {
+	if err := validateDownloadURL(asset.DownloadURL); err != nil {
 		return fmt.Errorf("invalid download URL: %w", err)
 	}
 	if checksumURL != "" {
@@ -255,22 +243,28 @@ func (s *UpdateService) PerformUpdateToVersion(ctx context.Context, targetVersio
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Download archive
-	archivePath := filepath.Join(tempDir, filepath.Base(downloadURL))
-	if err := s.downloadFile(ctx, downloadURL, archivePath); err != nil {
+	downloadPath := filepath.Join(tempDir, filepath.Base(asset.Name))
+	if err := s.downloadFile(ctx, asset.DownloadURL, downloadPath); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
 	// Verify checksum if available
 	if checksumURL != "" {
-		if err := s.verifyChecksum(ctx, archivePath, checksumURL); err != nil {
+		if err := s.verifyChecksum(ctx, downloadPath, checksumURL); err != nil {
 			return fmt.Errorf("checksum verification failed: %w", err)
 		}
 	}
 
-	// Extract binary from archive
 	newBinaryPath := filepath.Join(tempDir, "LightBridge")
-	if err := s.extractBinary(archivePath, newBinaryPath); err != nil {
-		return fmt.Errorf("extraction failed: %w", err)
+	if directBinary {
+		if err := os.Rename(downloadPath, newBinaryPath); err != nil {
+			return fmt.Errorf("prepare binary failed: %w", err)
+		}
+	} else {
+		// Extract binary from archive
+		if err := s.extractBinary(downloadPath, newBinaryPath); err != nil {
+			return fmt.Errorf("extraction failed: %w", err)
+		}
 	}
 
 	// Set executable permission before replacement
@@ -338,6 +332,7 @@ func (s *UpdateService) updateInfoForTargetVersion(ctx context.Context, targetVe
 				Body:        release.Body,
 				PublishedAt: release.PublishedAt,
 				HTMLURL:     release.HTMLURL,
+				Prerelease:  release.Prerelease,
 				Assets:      assets,
 			},
 			Cached:    false,
@@ -397,6 +392,7 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 			Body:        release.Body,
 			PublishedAt: release.PublishedAt,
 			HTMLURL:     release.HTMLURL,
+			Prerelease:  release.Prerelease,
 			Assets:      assets,
 		},
 		Cached:    false,
@@ -412,6 +408,49 @@ func (s *UpdateService) getArchiveName() string {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 	return fmt.Sprintf("%s_%s", osName, arch)
+}
+
+func (s *UpdateService) selectUpdateAsset(info *UpdateInfo) (*Asset, string, bool) {
+	if info == nil || info.ReleaseInfo == nil {
+		return nil, "", false
+	}
+
+	var checksumURL string
+	for _, asset := range info.ReleaseInfo.Assets {
+		if asset.Name == "checksums.txt" {
+			checksumURL = asset.DownloadURL
+			break
+		}
+	}
+
+	if info.ReleaseInfo.Prerelease {
+		if asset := s.findPreviewBinaryAsset(info); asset != nil {
+			return asset, checksumURL, true
+		}
+	}
+
+	archiveName := s.getArchiveName()
+	for i := range info.ReleaseInfo.Assets {
+		asset := &info.ReleaseInfo.Assets[i]
+		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
+			return asset, checksumURL, false
+		}
+	}
+	return nil, checksumURL, false
+}
+
+func (s *UpdateService) findPreviewBinaryAsset(info *UpdateInfo) *Asset {
+	version := normalizeVersionString(info.LatestVersion)
+	expectedName := fmt.Sprintf("LightBridge_%s_%s", version, s.getArchiveName())
+	if runtime.GOOS == "windows" {
+		expectedName += ".exe"
+	}
+	for i := range info.ReleaseInfo.Assets {
+		if info.ReleaseInfo.Assets[i].Name == expectedName {
+			return &info.ReleaseInfo.Assets[i]
+		}
+	}
+	return nil
 }
 
 // validateDownloadURL checks if the URL is from an allowed domain

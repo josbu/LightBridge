@@ -49,6 +49,18 @@
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.resetQuota') }}
             </button>
+            <!-- New API (LightBridge Connect) 专属操作：仅当该账号配置了 LightBridge Connect 时显示 -->
+            <template v-if="hasLbc">
+              <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+              <button @click="$emit('refresh-balance', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+                <Icon name="refresh" size="sm" />
+                {{ t('admin.accounts.lightBridgeConnect.refreshBalance') }}
+              </button>
+              <button @click="$emit('open-newapi-console', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+                <Icon name="link" size="sm" />
+                {{ t('admin.accounts.lightBridgeConnect.openConsole') }}
+              </button>
+            </template>
           </template>
         </div>
       </div>
@@ -61,10 +73,14 @@ import { computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
+import type { LightBridgeConnectBalanceItem } from '@/api/lightbridge-connect'
 
-const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'verify-authenticity', 'stats', 'schedule', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy'])
+const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null; lbcBalance?: LightBridgeConnectBalanceItem | null }>()
+const emit = defineEmits(['close', 'test', 'verify-authenticity', 'stats', 'schedule', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'refresh-balance', 'open-newapi-console'])
 const { t } = useI18n()
+// 该账号是否配置了 LightBridge Connect（New API 深度集成）。
+// 批量余额接口仅返回配置了 LBC 的账号，故 lbcBalance 非空即代表已配置。
+const hasLbc = computed(() => !!props.lbcBalance)
 // 仅 Claude/Anthropic 账号支持真伪检测（其它平台探针语义不适用）。
 const isClaudeAccount = computed(() => props.account?.platform === 'anthropic')
 const isRateLimited = computed(() => {

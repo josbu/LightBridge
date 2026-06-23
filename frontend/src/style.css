@@ -1607,6 +1607,42 @@
   .lightbridge-ops svg.text-teal-500 {
     color: var(--lb-red) !important;
   }
+
+  /* ============================================================
+     开关(Switch/Toggle)打开态颜色修复
+     上方皮肤用 [class*='bg-primary-'] / [class*='from-primary'] 等子串选择器
+     把卡片/弹窗内的强调色中性化，会误伤开关的"打开(on)"状态：
+       - Toggle.vue 的渐变被 background-image:none 清除 → 打开后透明；
+       - 其余开关的 bg-primary-* 被刷成 surface 浅色 → 打开/关闭难以区分。
+     这里按开关的结构特征重新恢复打开态强调色(青色轨道 + 白色滑块，
+     明暗模式均有足够对比)。位于覆盖规则之后，靠源码顺序在同层胜出。
+     ============================================================ */
+
+  /* A. role="switch" 按钮 (Toggle.vue / ToggleSwitch.vue，打开态原为渐变) */
+  button[role='switch'][aria-checked='true'] {
+    background-image: none !important;
+    background-color: #0d9488 !important;
+  }
+  .dark button[role='switch'][aria-checked='true'] {
+    background-color: #14b8a6 !important;
+  }
+
+  /* B. peer 模式开关/选择框 (input.peer:checked 紧邻带 peer-checked:bg-primary 的轨道) */
+  .peer:checked ~ [class*='peer-checked:bg-primary-'] {
+    background-color: #0d9488 !important;
+  }
+  .dark .peer:checked ~ [class*='peer-checked:bg-primary-'] {
+    background-color: #14b8a6 !important;
+  }
+
+  /* C. 内联开关按钮：圆角 button 内含白色圆形滑块(thumb)，打开时带 bg-primary-*
+        用 :has() 命中滑块结构，可避开步骤圆点/标签 chip/分段控件等同样用 bg-primary 的元素 */
+  button[class*='bg-primary-']:has(> span[class*='rounded-full'][class*='bg-white']) {
+    background-color: #0d9488 !important;
+  }
+  .dark button[class*='bg-primary-']:has(> span[class*='rounded-full'][class*='bg-white']) {
+    background-color: #14b8a6 !important;
+  }
 }
 
 @layer utilities {

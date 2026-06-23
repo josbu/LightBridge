@@ -12,7 +12,7 @@
 
 services:
   LightBridge:
-    image: weishaw/LightBridge:latest
+    image: williamwang1721/lightbridge:latest
     container_name: LightBridge
     restart: unless-stopped
     ulimits:

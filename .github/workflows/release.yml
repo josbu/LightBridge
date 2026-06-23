@@ -26,8 +26,33 @@ permissions:
   packages: write
 
 jobs:
+  release-meta:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      version: ${{ steps.meta.outputs.version }}
+      is_preview: ${{ steps.meta.outputs.is_preview }}
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.tag }}"
+          else
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${TAG_NAME#v}"
+          IS_PREVIEW=false
+          if [[ "$VERSION" == *-preview* ]]; then
+            IS_PREVIEW=true
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_preview=$IS_PREVIEW" >> "$GITHUB_OUTPUT"
+
   # Update VERSION file with tag version
   update-version:
+    needs: [release-meta]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,12 +60,7 @@ jobs:
 
       - name: Update VERSION file
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
-          else
-            VERSION=${GITHUB_REF#refs/tags/v}
-          fi
+          VERSION="${{ needs.release-meta.outputs.version }}"
           echo "$VERSION" > backend/cmd/server/VERSION
           echo "Updated VERSION file to: $VERSION"
 
@@ -85,7 +105,8 @@ jobs:
           retention-days: 1
 
   release:
-    needs: [update-version, build-frontend]
+    needs: [release-meta, update-version, build-frontend]
+    if: ${{ needs.release-meta.outputs.is_preview != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -272,9 +293,139 @@ jobs:
                 disable_web_page_preview: true
               }')"
 
+  preview-release:
+    needs: [release-meta, update-version, build-frontend]
+    if: ${{ needs.release-meta.outputs.is_preview == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-meta.outputs.tag_name }}
+
+      - name: Download VERSION artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: version-file
+          path: backend/cmd/server/
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: backend/internal/web/dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache-dependency-path: backend/go.sum
+
+      - name: Build preview binary
+        env:
+          VERSION: ${{ needs.release-meta.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/preview
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then
+            EXT=".exe"
+          fi
+          OUT="dist/preview/LightBridge_${VERSION}_${GOOS}_${GOARCH}${EXT}"
+          CGO_ENABLED=0 go build \
+            -tags=embed \
+            -trimpath \
+            -ldflags="-s -w -X main.Commit=${GITHUB_SHA} -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildType=release" \
+            -o "../${OUT}" \
+            ./cmd/server
+        working-directory: backend
+
+      - name: Upload preview binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/preview/LightBridge_${{ needs.release-meta.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}*
+          retention-days: 1
+
+  publish-preview-release:
+    needs: [release-meta, preview-release]
+    if: ${{ needs.release-meta.outputs.is_preview == 'true' && needs.preview-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-meta.outputs.tag_name }}
+
+      - name: Download preview binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: preview-*
+          path: dist/preview
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd dist/preview
+          sha256sum LightBridge_* > checksums.txt
+
+      - name: Get tag message
+        id: tag_message
+        run: |
+          TAG_NAME="${{ needs.release-meta.outputs.tag_name }}"
+          git fetch --tags --force
+          TAG_MESSAGE=$(git tag -l --format='%(contents:body)' "$TAG_NAME")
+          if [ -z "$TAG_MESSAGE" ]; then
+            TAG_MESSAGE="Preview build ${TAG_NAME}"
+          fi
+          echo "message<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TAG_MESSAGE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update preview release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-meta.outputs.tag_name }}
+          VERSION: ${{ needs.release-meta.outputs.version }}
+          TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "LightBridge ${VERSION} (Preview)" \
+              --notes "$TAG_MESSAGE" \
+              --prerelease
+          else
+            gh release create "$TAG_NAME" \
+              --title "LightBridge ${VERSION} (Preview)" \
+              --notes "$TAG_MESSAGE" \
+              --prerelease
+          fi
+          gh release upload "$TAG_NAME" dist/preview/LightBridge_* dist/preview/checksums.txt --clobber
+
   sync-version-file:
-    needs: [release]
-    if: ${{ needs.release.result == 'success' }}
+    needs: [release-meta, release, publish-preview-release]
+    if: ${{ always() && (needs.release.result == 'success' || needs.publish-preview-release.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout default branch
@@ -284,12 +435,7 @@ jobs:
 
       - name: Sync VERSION file to released tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
-          else
-            VERSION=${GITHUB_REF#refs/tags/v}
-          fi
+          VERSION="${{ needs.release-meta.outputs.version }}"
 
           CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
           if [ "$CURRENT_VERSION" = "$VERSION" ]; then

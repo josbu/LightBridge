@@ -5,7 +5,30 @@ import type {
   LightBridgeConnectAlertConfig
 } from '@/types'
 
+/** 单个账号的 LightBridge Connect 余额快照（账号列表批量查询用） */
+export interface LightBridgeConnectBalanceItem {
+  account_id: number
+  instance_url: string
+  balance: number // 余额（分）
+  used: number // 已使用（分）
+  currency: string
+  last_sync_at?: string
+}
+
 export const lightBridgeConnectAPI = {
+  /**
+   * 批量获取若干账号已缓存的 LightBridge Connect 余额（不触发上游同步）。
+   * 仅返回配置了 LightBridge Connect 的账号。
+   */
+  async batchBalances(accountIds: number[]): Promise<LightBridgeConnectBalanceItem[]> {
+    if (accountIds.length === 0) return []
+    const response = await apiClient.post<{ balances: LightBridgeConnectBalanceItem[] }>(
+      '/admin/accounts/lightbridge-connect/batch-balances',
+      { account_ids: accountIds }
+    )
+    return response.data?.balances ?? []
+  },
+
   /**
    * 验证 LightBridge Connect 系统令牌
    */

@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -176,4 +178,76 @@ func TestParseVersionStripsPrereleaseSuffix(t *testing.T) {
 	require.Equal(t, [3]int{0, 2, 4}, parseVersion("v0.2.4-rc.1"))
 	require.Equal(t, [3]int{1, 2, 3}, parseVersion("1.2.3+build.5"))
 	require.Equal(t, 0, compareVersions("0.2.4-preview", "0.2.4"))
+}
+
+func TestSelectUpdateAssetPreviewPrefersIncrementalBinary(t *testing.T) {
+	svc := NewUpdateService(&updateServiceCacheStub{}, &updateServiceGitHubClientStub{}, "0.2.3", "release")
+	archiveName := fmt.Sprintf("LightBridge_0.2.4-preview_%s.tar.gz", svc.getArchiveName())
+	binaryName := fmt.Sprintf("LightBridge_0.2.4-preview_%s", svc.getArchiveName())
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	info := &UpdateInfo{
+		LatestVersion: "0.2.4-preview",
+		ReleaseInfo: &ReleaseInfo{
+			Prerelease: true,
+			Assets: []Asset{
+				{Name: archiveName, DownloadURL: "https://github.com/example/archive"},
+				{Name: binaryName, DownloadURL: "https://github.com/example/binary"},
+				{Name: "checksums.txt", DownloadURL: "https://github.com/example/checksums"},
+			},
+		},
+	}
+
+	asset, checksumURL, directBinary := svc.selectUpdateAsset(info)
+
+	require.NotNil(t, asset)
+	require.Equal(t, binaryName, asset.Name)
+	require.Equal(t, "https://github.com/example/checksums", checksumURL)
+	require.True(t, directBinary)
+}
+
+func TestSelectUpdateAssetProductionUsesArchive(t *testing.T) {
+	svc := NewUpdateService(&updateServiceCacheStub{}, &updateServiceGitHubClientStub{}, "0.2.3", "release")
+	binaryName := fmt.Sprintf("LightBridge_0.2.4_%s", svc.getArchiveName())
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	archiveName := fmt.Sprintf("LightBridge_0.2.4_%s.tar.gz", svc.getArchiveName())
+	info := &UpdateInfo{
+		LatestVersion: "0.2.4",
+		ReleaseInfo: &ReleaseInfo{
+			Prerelease: false,
+			Assets: []Asset{
+				{Name: binaryName, DownloadURL: "https://github.com/example/binary"},
+				{Name: archiveName, DownloadURL: "https://github.com/example/archive"},
+			},
+		},
+	}
+
+	asset, _, directBinary := svc.selectUpdateAsset(info)
+
+	require.NotNil(t, asset)
+	require.Equal(t, archiveName, asset.Name)
+	require.False(t, directBinary)
+}
+
+func TestSelectUpdateAssetPreviewFallsBackToArchive(t *testing.T) {
+	svc := NewUpdateService(&updateServiceCacheStub{}, &updateServiceGitHubClientStub{}, "0.2.3", "release")
+	archiveName := fmt.Sprintf("LightBridge_0.2.4-preview_%s.tar.gz", svc.getArchiveName())
+	info := &UpdateInfo{
+		LatestVersion: "0.2.4-preview",
+		ReleaseInfo: &ReleaseInfo{
+			Prerelease: true,
+			Assets: []Asset{
+				{Name: archiveName, DownloadURL: "https://github.com/example/archive"},
+			},
+		},
+	}
+
+	asset, _, directBinary := svc.selectUpdateAsset(info)
+
+	require.NotNil(t, asset)
+	require.Equal(t, archiveName, asset.Name)
+	require.False(t, directBinary)
 }

@@ -297,6 +297,22 @@
               :error="todayStatsError"
             />
           </template>
+          <template #cell-newapi_balance="{ row }">
+            <div v-if="lbcBalanceByAccountId[String(row.id)]" class="flex items-center gap-1.5">
+              <span class="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
+                {{ formatLbcBalance(lbcBalanceByAccountId[String(row.id)]) }}
+              </span>
+              <button
+                @click="handleSyncLbcBalance(row)"
+                :disabled="lbcSyncingAccountId === row.id"
+                class="rounded p-0.5 text-gray-400 transition-colors hover:text-primary-600 disabled:opacity-50 dark:hover:text-primary-400"
+                :title="t('admin.accounts.lightBridgeConnect.refreshBalance')"
+              >
+                <Icon name="refresh" size="xs" :class="lbcSyncingAccountId === row.id ? 'animate-spin' : ''" />
+              </button>
+            </div>
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          </template>
           <template #cell-groups="{ row }">
             <AccountGroupsCell :groups="row.groups" :max-display="4" />
           </template>
@@ -377,7 +393,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @verify-authenticity="handleVerifyAuthenticity" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" :lbc-balance="menu.acc ? (lbcBalanceByAccountId[String(menu.acc.id)] ?? null) : null" @close="menu.show = false" @test="handleTest" @verify-authenticity="handleVerifyAuthenticity" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @refresh-balance="handleSyncLbcBalance" @open-newapi-console="handleOpenNewApiConsole" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -440,6 +456,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { lightBridgeConnectAPI, type LightBridgeConnectBalanceItem } from '@/api/lightbridge-connect'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'
 
@@ -579,6 +596,40 @@ const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const usageManualRefreshToken = ref(0)
+
+// LightBridge Connect (New API) 余额：由后端定时同步写入 DB，这里批量拉取已缓存值。
+const lbcBalanceByAccountId = ref<Record<string, LightBridgeConnectBalanceItem>>({})
+const lbcBalanceReqSeq = ref(0)
+const lbcSyncingAccountId = ref<number | null>(null)
+
+const refreshLbcBalancesBatch = async () => {
+  const accountIDs = accounts.value.map(account => account.id)
+  const reqSeq = ++lbcBalanceReqSeq.value
+  if (accountIDs.length === 0) {
+    lbcBalanceByAccountId.value = {}
+    return
+  }
+  try {
+    const items = await lightBridgeConnectAPI.batchBalances(accountIDs)
+    if (reqSeq !== lbcBalanceReqSeq.value) return
+    const next: Record<string, LightBridgeConnectBalanceItem> = {}
+    for (const item of items) {
+      next[String(item.account_id)] = item
+    }
+    lbcBalanceByAccountId.value = next
+  } catch (error) {
+    if (reqSeq !== lbcBalanceReqSeq.value) return
+    console.error('Failed to load LightBridge Connect balances:', error)
+  }
+}
+
+// New API 余额按 New API 内部额度单位换算：500000 = $1（与 New API 前端一致）。
+const NEWAPI_QUOTA_PER_USD = 500000
+const formatLbcBalance = (item: LightBridgeConnectBalanceItem | undefined): string => {
+  if (!item) return ''
+  const usd = item.balance / NEWAPI_QUOTA_PER_USD
+  return `$${usd.toFixed(2)}`
+}
 
 const buildDefaultTodayStats = (): WindowStats => ({
   requests: 0,
@@ -823,6 +874,7 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await baseReload()
   await refreshTodayStatsBatch()
+  await refreshLbcBalancesBatch()
 }
 
 const debouncedReload = () => {
@@ -864,6 +916,9 @@ watch(loading, (isLoading, wasLoading) => {
     pendingTodayStatsRefresh.value = false
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to refresh account today stats after table load:', error)
+    })
+    refreshLbcBalancesBatch().catch((error) => {
+      console.error('Failed to refresh LightBridge Connect balances after table load:', error)
     })
   }
 })
@@ -1177,7 +1232,8 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
+    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
+    { key: 'newapi_balance', label: t('admin.accounts.columns.newapiBalance'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
@@ -1658,6 +1714,44 @@ const handleSetPrivacy = async (a: Account) => {
     console.error('Failed to set privacy:', error)
     appStore.showError(error?.response?.data?.message || t('admin.accounts.privacyFailed'))
   }
+}
+// 手动同步单个 New API 账号余额（调用上游实时拉取 + 写库），随后刷新展示。
+const handleSyncLbcBalance = async (a: Account) => {
+  if (lbcSyncingAccountId.value === a.id) return
+  lbcSyncingAccountId.value = a.id
+  try {
+    const result = await lightBridgeConnectAPI.syncQuota(a.id)
+    const prev = lbcBalanceByAccountId.value[String(a.id)]
+    lbcBalanceByAccountId.value = {
+      ...lbcBalanceByAccountId.value,
+      [String(a.id)]: {
+        account_id: a.id,
+        instance_url: prev?.instance_url ?? '',
+        balance: result.balance,
+        used: result.used,
+        currency: result.currency,
+        last_sync_at: result.last_sync_at
+      }
+    }
+    appStore.showSuccess(t('admin.accounts.lightBridgeConnect.refreshBalanceSuccess'))
+  } catch (error: any) {
+    console.error('Failed to sync New API balance:', error)
+    appStore.showError(error?.response?.data?.error || t('admin.accounts.lightBridgeConnect.refreshBalanceFailed'))
+  } finally {
+    if (lbcSyncingAccountId.value === a.id) lbcSyncingAccountId.value = null
+  }
+}
+// 打开 New API 控制台：取账号 LightBridge Connect 配置的 instance_url，去掉 /v1 /v2 后缀后新标签打开。
+const handleOpenNewApiConsole = (a: Account) => {
+  const item = lbcBalanceByAccountId.value[String(a.id)]
+  const raw = item?.instance_url || ''
+  if (!raw) {
+    appStore.showError(t('admin.accounts.lightBridgeConnect.consoleUrlMissing'))
+    return
+  }
+  let url = raw.replace(/\/+$/, '')
+  url = url.replace(/\/(v1|v2)$/i, '')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
