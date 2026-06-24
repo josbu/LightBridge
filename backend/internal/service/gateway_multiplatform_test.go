@@ -420,6 +420,252 @@ func TestGatewayService_SelectAccountForModelWithPlatform_GeminiOAuthPreference(
 	require.Equal(t, int64(2), acc.ID, "同优先级且未使用时应优先选择OAuth账户")
 }
 
+func TestGatewayService_SelectAccountForModelWithPlatform_OpenAIGroupSelectsCustomOpenAIAccount(t *testing.T) {
+	groupID := int64(11)
+	ctx := context.WithValue(context.Background(), ctxkey.RequiredProtocol, CustomProtocolOpenAIResponses)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          9,
+				Platform:    PlatformCustom,
+				Type:        AccountTypeAPIKey,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+				Extra:       map[string]any{"protocol": CustomProtocolOpenAIResponses},
+				AccountGroups: []AccountGroup{
+					{GroupID: groupID},
+				},
+				GroupIDs: []int64{groupID},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			groupID: {ID: groupID, Platform: PlatformOpenAI, Status: StatusActive},
+		}},
+		cache: &mockGatewayCacheForPlatform{},
+		cfg:   testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", "gpt-5", nil, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(9), acc.ID)
+	require.Equal(t, PlatformCustom, acc.Platform)
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_CustomAccountsAcrossGroupPlatforms(t *testing.T) {
+	tests := []struct {
+		name             string
+		groupPlatform    string
+		targetPlatform   string
+		requiredProtocol string
+		accountProtocol  string
+		model            string
+		accountID        int64
+	}{
+		{
+			name:             "anthropic group selects custom anthropic account",
+			groupPlatform:    PlatformAnthropic,
+			targetPlatform:   PlatformAnthropic,
+			requiredProtocol: CustomProtocolAnthropicMessages,
+			accountProtocol:  CustomProtocolAnthropicMessages,
+			model:            "claude-sonnet-4-20250514",
+			accountID:        21,
+		},
+		{
+			name:             "gemini group selects custom gemini account",
+			groupPlatform:    PlatformGemini,
+			targetPlatform:   PlatformGemini,
+			requiredProtocol: CustomProtocolGemini,
+			accountProtocol:  CustomProtocolGemini,
+			model:            "gemini-2.5-pro",
+			accountID:        22,
+		},
+		{
+			name:             "custom group selects custom openai account",
+			groupPlatform:    PlatformCustom,
+			targetPlatform:   PlatformCustom,
+			requiredProtocol: CustomProtocolOpenAIResponses,
+			accountProtocol:  CustomProtocolOpenAIResponses,
+			model:            "gpt-5",
+			accountID:        23,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := tt.accountID + 100
+			ctx := context.WithValue(context.Background(), ctxkey.RequiredProtocol, tt.requiredProtocol)
+			repo := &mockAccountRepoForPlatform{
+				accounts: []Account{
+					{
+						ID:          tt.accountID,
+						Platform:    PlatformCustom,
+						Type:        AccountTypeAPIKey,
+						Priority:    1,
+						Status:      StatusActive,
+						Schedulable: true,
+						Extra:       map[string]any{"protocol": tt.accountProtocol},
+						AccountGroups: []AccountGroup{
+							{GroupID: groupID},
+						},
+						GroupIDs: []int64{groupID},
+					},
+				},
+				accountsByID: map[int64]*Account{},
+			}
+			for i := range repo.accounts {
+				repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+			}
+
+			svc := &GatewayService{
+				accountRepo: repo,
+				groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+					groupID: {ID: groupID, Platform: tt.groupPlatform, Status: StatusActive},
+				}},
+				cache: &mockGatewayCacheForPlatform{},
+				cfg:   testConfig(),
+			}
+
+			acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", tt.model, nil, tt.targetPlatform)
+			require.NoError(t, err)
+			require.NotNil(t, acc)
+			require.Equal(t, tt.accountID, acc.ID)
+			require.Equal(t, PlatformCustom, acc.Platform)
+		})
+	}
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_OpenAICompatibilityOverridesInboundProtocol(t *testing.T) {
+	groupID := int64(14)
+	ctx := context.WithValue(context.Background(), ctxkey.RequiredProtocol, CustomProtocolOpenAIResponses)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          24,
+				Platform:    PlatformCustom,
+				Type:        AccountTypeAPIKey,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+				Extra:       map[string]any{"protocol": CustomProtocolOpenAIResponses},
+				AccountGroups: []AccountGroup{
+					{GroupID: groupID},
+				},
+				GroupIDs: []int64{groupID},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			groupID: {ID: groupID, Platform: PlatformOpenAI, Status: StatusActive},
+		}},
+		cache: &mockGatewayCacheForPlatform{},
+		cfg:   testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", "gpt-5", nil, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(24), acc.ID)
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_CustomProtocolMismatchFiltered(t *testing.T) {
+	groupID := int64(12)
+	ctx := context.WithValue(context.Background(), ctxkey.RequiredProtocol, CustomProtocolOpenAIResponses)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          10,
+				Platform:    PlatformCustom,
+				Type:        AccountTypeAPIKey,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+				Extra:       map[string]any{"protocol": CustomProtocolOpenAIChatCompletions},
+				AccountGroups: []AccountGroup{
+					{GroupID: groupID},
+				},
+				GroupIDs: []int64{groupID},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			groupID: {ID: groupID, Platform: PlatformOpenAI, Status: StatusActive},
+		}},
+		cache: &mockGatewayCacheForPlatform{},
+		cfg:   testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", "gpt-5", nil, PlatformOpenAI)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, acc)
+}
+
+func TestSchedulerSnapshotLoadAccountsFromDB_OpenAIBucketIncludesCustomAccounts(t *testing.T) {
+	groupID := int64(13)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          11,
+				Platform:    PlatformCustom,
+				Type:        AccountTypeAPIKey,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+				Extra:       map[string]any{"protocol": CustomProtocolOpenAIResponses},
+				AccountGroups: []AccountGroup{
+					{GroupID: groupID},
+				},
+				GroupIDs: []int64{groupID},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	snapshot := &SchedulerSnapshotService{
+		accountRepo: repo,
+		cfg:         testConfig(),
+	}
+
+	accounts, err := snapshot.loadAccountsFromDB(context.Background(), SchedulerBucket{
+		GroupID:  groupID,
+		Platform: PlatformOpenAI,
+		Mode:     SchedulerModeSingle,
+	}, false)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Equal(t, int64(11), accounts[0].ID)
+	require.Equal(t, PlatformCustom, accounts[0].Platform)
+}
+
 // TestGatewayService_SelectAccountForModelWithPlatform_NoAvailableAccounts 测试无可用账户
 func TestGatewayService_SelectAccountForModelWithPlatform_NoAvailableAccounts(t *testing.T) {
 	ctx := context.Background()

@@ -46,7 +46,7 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if shouldUseOpenAIHandler(c) {
 				h.OpenAIGateway.Messages(c)
 				return
 			}
@@ -54,7 +54,7 @@ func RegisterGatewayRoutes(
 		})
 		// /v1/messages/count_tokens: OpenAI groups get 404
 		gateway.POST("/messages/count_tokens", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if shouldUseOpenAIHandler(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"type": "error",
@@ -71,14 +71,14 @@ func RegisterGatewayRoutes(
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if shouldUseOpenAIHandler(c) {
 				h.OpenAIGateway.Responses(c)
 				return
 			}
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if shouldUseOpenAIHandler(c) {
 				h.OpenAIGateway.Responses(c)
 				return
 			}
@@ -87,14 +87,14 @@ func RegisterGatewayRoutes(
 		gateway.GET("/responses", h.OpenAIGateway.ResponsesWebSocket)
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			if getGroupPlatform(c) == service.PlatformOpenAI {
+			if shouldUseOpenAIHandler(c) {
 				h.OpenAIGateway.ChatCompletions(c)
 				return
 			}
 			h.Gateway.ChatCompletions(c)
 		})
 		gateway.POST("/embeddings", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
+			if !shouldUseOpenAIHandler(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"error": gin.H{
@@ -107,7 +107,7 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Embeddings(c)
 		})
 		gateway.POST("/images/generations", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
+			if !shouldUseOpenAIHandler(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"error": gin.H{
@@ -120,7 +120,7 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Images(c)
 		})
 		gateway.POST("/images/edits", func(c *gin.Context) {
-			if getGroupPlatform(c) != service.PlatformOpenAI {
+			if !shouldUseOpenAIHandler(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 				c.JSON(http.StatusNotFound, gin.H{
 					"error": gin.H{
@@ -147,12 +147,25 @@ func RegisterGatewayRoutes(
 		gemini.GET("/models", h.Gateway.GeminiV1BetaListModels)
 		gemini.GET("/models/:model", h.Gateway.GeminiV1BetaGetModel)
 		// Gin treats ":" as a param marker, but Gemini uses "{model}:{action}" in the same segment.
-		gemini.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
+		gemini.POST("/models/*modelAction", func(c *gin.Context) {
+			if !shouldUseGeminiHandler(c) {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": gin.H{
+						"code":    http.StatusBadRequest,
+						"message": "API key group platform is not gemini",
+						"status":  "INVALID_ARGUMENT",
+					},
+				})
+				return
+			}
+			h.Gateway.GeminiV1BetaModels(c)
+		})
 	}
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
 	responsesHandler := func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
+		if shouldUseOpenAIHandler(c) {
 			h.OpenAIGateway.Responses(c)
 			return
 		}
@@ -170,14 +183,14 @@ func RegisterGatewayRoutes(
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	r.POST("/chat/completions", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, privacyResp, func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformOpenAI {
+		if shouldUseOpenAIHandler(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
 	})
 	r.POST("/embeddings", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, privacyResp, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
+		if !shouldUseOpenAIHandler(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{
@@ -190,7 +203,7 @@ func RegisterGatewayRoutes(
 		h.OpenAIGateway.Embeddings(c)
 	})
 	r.POST("/images/generations", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, privacyResp, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
+		if !shouldUseOpenAIHandler(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{
@@ -203,7 +216,7 @@ func RegisterGatewayRoutes(
 		h.OpenAIGateway.Images(c)
 	})
 	r.POST("/images/edits", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, privacyResp, func(c *gin.Context) {
-		if getGroupPlatform(c) != service.PlatformOpenAI {
+		if !shouldUseOpenAIHandler(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{
@@ -260,4 +273,37 @@ func getGroupPlatform(c *gin.Context) string {
 		return ""
 	}
 	return apiKey.Group.Platform
+}
+
+func shouldUseOpenAIHandler(c *gin.Context) bool {
+	switch getGroupPlatform(c) {
+	case service.PlatformOpenAI:
+		return true
+	case service.PlatformCustom:
+		return isOpenAIInboundEndpoint(handler.GetInboundEndpoint(c))
+	default:
+		return false
+	}
+}
+
+func shouldUseGeminiHandler(c *gin.Context) bool {
+	switch getGroupPlatform(c) {
+	case service.PlatformGemini:
+		return true
+	case service.PlatformCustom:
+		return handler.RequiredProtocolForInboundEndpoint(handler.GetInboundEndpoint(c)) == service.CustomProtocolGemini
+	default:
+		return false
+	}
+}
+
+func isOpenAIInboundEndpoint(inbound string) bool {
+	switch handler.RequiredProtocolForInboundEndpoint(inbound) {
+	case service.CustomProtocolOpenAIResponses,
+		service.CustomProtocolOpenAIChatCompletions,
+		service.CustomProtocolOpenAIEmbeddings:
+		return true
+	default:
+		return inbound == handler.EndpointImagesGenerations || inbound == handler.EndpointImagesEdits
+	}
 }

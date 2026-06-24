@@ -169,6 +169,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	groupPlatform := ""
+	if apiKey.Group != nil {
+		groupPlatform = apiKey.Group.Platform
+	}
+	setCustomRequiredProtocol(c, protocolForGatewayCompatPlatform(groupPlatform))
 
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)

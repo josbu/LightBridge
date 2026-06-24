@@ -58,7 +58,7 @@ type GatewayHandler struct {
 	settingService            *service.SettingService
 	// aistudioProxyManager manages the self-hosted aistudio-api subprocess for
 	// Gemini Bearer (AIStudio reverse-proxy) accounts. May be nil (feature off).
-	aistudioProxyManager      *aistudio_proxy.Manager
+	aistudioProxyManager *aistudio_proxy.Manager
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -127,6 +127,13 @@ func (h *GatewayHandler) SetAistudioProxyManager(m *aistudio_proxy.Manager) {
 	if h != nil {
 		h.aistudioProxyManager = m
 	}
+}
+
+func protocolForGatewayCompatPlatform(platform string) string {
+	if platform == service.PlatformGemini {
+		return service.CustomProtocolGemini
+	}
+	return service.CustomProtocolAnthropicMessages
 }
 
 // Messages handles Claude API compatible messages endpoint
@@ -305,6 +312,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	} else if apiKey.Group != nil {
 		platform = apiKey.Group.Platform
 	}
+	setCustomRequiredProtocol(c, protocolForGatewayCompatPlatform(platform))
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -459,7 +467,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.IsAntigravity() {
+			if account.IsCustom() && account.CustomProtocol() == service.CustomProtocolAnthropicMessages {
+				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
+			} else if account.IsAntigravity() {
 				result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, hasBoundSession)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)

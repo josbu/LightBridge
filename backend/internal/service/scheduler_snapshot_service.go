@@ -682,14 +682,21 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 		}
 	} else {
-		// 非混合：queryPlatforms 必为单元素，沿用单数仓库方法（与历史调用模式一致）。
-		qp := queryPlatforms[0]
-		if groupID > 0 {
-			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, qp)
+		if len(queryPlatforms) == 1 {
+			qp := queryPlatforms[0]
+			if groupID > 0 {
+				accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, qp)
+			} else if s.isRunModeSimple() {
+				accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, qp)
+			} else {
+				accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, qp)
+			}
+		} else if groupID > 0 {
+			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, queryPlatforms)
 		} else if s.isRunModeSimple() {
-			accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, qp)
+			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
 		} else {
-			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, qp)
+			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 		}
 	}
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
+	setCustomRequiredProtocol(c, service.CustomProtocolOpenAIChatCompletions)
 
 	requestStart := time.Now()
 

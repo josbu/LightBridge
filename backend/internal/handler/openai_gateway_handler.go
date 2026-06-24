@@ -73,6 +73,13 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 	}
 }
 
+func setCustomRequiredProtocol(c *gin.Context, protocol string) {
+	if c == nil || c.Request == nil || strings.TrimSpace(protocol) == "" {
+		return
+	}
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequiredProtocol, strings.TrimSpace(protocol)))
+}
+
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
@@ -117,6 +124,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	compactStartedAt := time.Now()
 	defer h.logOpenAIRemoteCompactOutcome(c, compactStartedAt)
 	setOpenAIClientTransportHTTP(c)
+	setCustomRequiredProtocol(c, service.CustomProtocolOpenAIResponses)
 
 	requestStart := time.Now()
 
@@ -588,6 +596,7 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverAnthropicMessagesPanic(c, &streamStarted)
+	setCustomRequiredProtocol(c, service.CustomProtocolOpenAIResponses)
 
 	requestStart := time.Now()
 

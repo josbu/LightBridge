@@ -535,6 +535,40 @@ func TestGetAvailableModels_UsesShortCacheAndSupportsInvalidation(t *testing.T) 
 	require.Equal(t, int64(2), store)
 }
 
+func TestGetAvailableModels_PlatformFilterIncludesCustomAccounts(t *testing.T) {
+	resetGatewayHotpathStatsForTest()
+
+	groupID := int64(8)
+	repo := &modelsListAccountRepoStub{
+		byGroup: map[int64][]Account{
+			groupID: {
+				{
+					ID:       1,
+					Platform: PlatformCustom,
+					Extra: map[string]any{
+						"protocol": CustomProtocolOpenAIResponses,
+					},
+					Credentials: map[string]any{
+						"model_mapping": map[string]any{
+							"custom-gpt": "upstream-gpt",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc := &GatewayService{
+		accountRepo:        repo,
+		modelsListCache:    gocache.New(time.Minute, time.Minute),
+		modelsListCacheTTL: time.Minute,
+	}
+
+	models := svc.GetAvailableModels(context.Background(), &groupID, PlatformOpenAI)
+	require.Equal(t, []string{"custom-gpt"}, models)
+	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
+}
+
 func TestGetAvailableModels_ErrorAndGlobalListBranches(t *testing.T) {
 	resetGatewayHotpathStatsForTest()
 

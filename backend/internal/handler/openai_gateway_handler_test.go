@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/WilliamWang1721/LightBridge/internal/config"
+	"github.com/WilliamWang1721/LightBridge/internal/pkg/ctxkey"
 	pkghttputil "github.com/WilliamWang1721/LightBridge/internal/pkg/httputil"
 	"github.com/WilliamWang1721/LightBridge/internal/pkg/pagination"
 	"github.com/WilliamWang1721/LightBridge/internal/server/middleware"
@@ -23,6 +24,20 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+func TestSetCustomRequiredProtocolOverridesInboundProtocol(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxkey.RequiredProtocol, service.CustomProtocolAnthropicMessages))
+	c.Request = req
+
+	setCustomRequiredProtocol(c, service.CustomProtocolOpenAIResponses)
+
+	got, _ := c.Request.Context().Value(ctxkey.RequiredProtocol).(string)
+	require.Equal(t, service.CustomProtocolOpenAIResponses, got)
+}
 
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 	tests := []struct {

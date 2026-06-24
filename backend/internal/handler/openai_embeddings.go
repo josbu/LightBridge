@@ -22,6 +22,7 @@ import (
 // POST /v1/embeddings
 func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	streamStarted := false
+	setCustomRequiredProtocol(c, service.CustomProtocolOpenAIEmbeddings)
 	requestStart := time.Now()
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
