@@ -1,4 +1,5 @@
 import type { OpsErrorDetail, OpsErrorLog } from '@/api/admin/ops'
+import type { Account } from '@/types'
 
 export type ErrorAnalysisStepState = 'passed' | 'failed' | 'warning' | 'skipped' | 'pending'
 
@@ -43,6 +44,35 @@ export interface ErrorAnalysisResult {
   suggestionKeys: string[]
 }
 
+export type ErrorAnalysisAccountReasonKey =
+  | 'group_mismatch'
+  | 'platform_mismatch'
+  | 'status_inactive'
+  | 'status_error'
+  | 'unschedulable'
+  | 'rate_limited'
+  | 'temp_unschedulable'
+  | 'overloaded'
+  | 'expired'
+  | 'concurrency_full'
+  | 'rpm_limit'
+  | 'quota_exhausted'
+  | 'daily_quota_exhausted'
+  | 'weekly_quota_exhausted'
+  | 'session_window_rejected'
+  | 'model_not_allowed'
+
+export interface ErrorAnalysisAccountReason {
+  key: ErrorAnalysisAccountReasonKey
+  detail?: string
+}
+
+export interface ErrorAnalysisAccountDiagnostic {
+  account: Account
+  available: boolean
+  reasons: ErrorAnalysisAccountReason[]
+}
+
 const NO_AVAILABLE_ACCOUNT_RE = /no\s+available\s+accounts?|无可用账号/i
 const MODULE_PROVIDER_RE = /module provider|provider registry|provider id|adapter/i
 const NETWORK_RE = /timeout|deadline|connection refused|connection reset|dial tcp|tls|dns|network/i
@@ -60,6 +90,43 @@ function textOf(detail: OpsErrorDetail | OpsErrorLog | null | undefined): string
 
 function normalize(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
+}
+
+function isFuture(value: string | number | null | undefined, now = Date.now()): boolean {
+  if (value == null || value === '') return false
+  const timestamp = typeof value === 'number'
+    ? value < 1000000000000 ? value * 1000 : value
+    : new Date(value).getTime()
+  return Number.isFinite(timestamp) && timestamp > now
+}
+
+function getAccountModelWhitelist(account: Account): string[] {
+  const raw = account.extra?.model_whitelist ?? account.extra?.models ?? account.extra?.supported_models
+  if (Array.isArray(raw)) return raw.map((item) => String(item).trim()).filter(Boolean)
+  if (typeof raw === 'string') {
+    return raw.split(/[,\n]/).map((item) => item.trim()).filter(Boolean)
+  }
+  return []
+}
+
+function modelMatchesPattern(model: string, pattern: string): boolean {
+  const normalizedModel = normalize(model)
+  const normalizedPattern = normalize(pattern)
+  if (!normalizedModel || !normalizedPattern) return false
+  if (normalizedPattern === '*') return true
+  if (!normalizedPattern.includes('*')) return normalizedModel === normalizedPattern
+
+  const escaped = normalizedPattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*')
+  return new RegExp(`^${escaped}$`).test(normalizedModel)
+}
+
+function accountAllowsModel(account: Account, model: string): boolean {
+  const whitelist = getAccountModelWhitelist(account)
+  if (whitelist.length === 0 || !model.trim()) return true
+  return whitelist.some((pattern) => modelMatchesPattern(model, pattern))
 }
 
 function hasNoAvailableAccount(detail: OpsErrorDetail | null): boolean {
@@ -181,6 +248,11 @@ function modelLabel(detail: OpsErrorDetail | null): string {
   const upstream = String(detail.upstream_model || '').trim()
   if (requested && upstream && requested !== upstream) return `${requested} -> ${upstream}`
   return upstream || requested || String(detail.model || '').trim()
+}
+
+function requestedModelLabel(detail: OpsErrorDetail | null): string {
+  if (!detail) return ''
+  return String(detail.requested_model || detail.model || detail.upstream_model || '').trim()
 }
 
 function buildStepEvidence(
@@ -346,4 +418,79 @@ export function shortErrorMessage(detail: OpsErrorLog | OpsErrorDetail | null | 
   if (!message) return ''
   if (message.length <= 160) return message
   return `${message.slice(0, 157)}...`
+}
+
+export function accountDisplayLabel(account: Account): string {
+  return account.name || `#${account.id}`
+}
+
+export function diagnoseSchedulerAccount(
+  account: Account,
+  detail: OpsErrorDetail | null,
+  now = Date.now()
+): ErrorAnalysisAccountDiagnostic {
+  const reasons: ErrorAnalysisAccountReason[] = []
+  const groupID = detail?.group_id ?? null
+  const model = requestedModelLabel(detail)
+  const accountGroupIDs = account.group_ids ?? account.groups?.map((group) => group.id) ?? []
+
+  if (groupID != null && !accountGroupIDs.includes(groupID)) {
+    reasons.push({ key: 'group_mismatch', detail: String(groupID) })
+  }
+
+  if (detail?.platform && normalize(account.platform) !== normalize(detail.platform)) {
+    reasons.push({ key: 'platform_mismatch', detail: `${account.platform} != ${detail.platform}` })
+  }
+
+  if (account.status === 'inactive') reasons.push({ key: 'status_inactive' })
+  if (account.status === 'error') reasons.push({ key: 'status_error', detail: account.error_message || undefined })
+  if (account.schedulable === false) reasons.push({ key: 'unschedulable' })
+  if (isFuture(account.rate_limit_reset_at, now)) reasons.push({ key: 'rate_limited', detail: account.rate_limit_reset_at || undefined })
+  if (isFuture(account.temp_unschedulable_until, now)) reasons.push({ key: 'temp_unschedulable', detail: account.temp_unschedulable_reason || account.temp_unschedulable_until || undefined })
+  if (isFuture(account.overload_until, now)) reasons.push({ key: 'overloaded', detail: account.overload_until || undefined })
+  if (isFuture(account.expires_at, now) === false && account.expires_at != null && account.expires_at > 0) reasons.push({ key: 'expired' })
+
+  const concurrency = Number(account.concurrency ?? 0)
+  const currentConcurrency = Number(account.current_concurrency ?? 0)
+  if (concurrency > 0 && currentConcurrency >= concurrency) {
+    reasons.push({ key: 'concurrency_full', detail: `${currentConcurrency}/${concurrency}` })
+  }
+
+  const baseRPM = Number(account.base_rpm ?? 0)
+  const currentRPM = Number(account.current_rpm ?? 0)
+  if (baseRPM > 0 && currentRPM >= baseRPM) {
+    reasons.push({ key: 'rpm_limit', detail: `${currentRPM}/${baseRPM}` })
+  }
+
+  if (typeof account.quota_limit === 'number' && account.quota_limit > 0 && Number(account.quota_used ?? 0) >= account.quota_limit) {
+    reasons.push({ key: 'quota_exhausted', detail: `${account.quota_used ?? 0}/${account.quota_limit}` })
+  }
+  if (typeof account.quota_daily_limit === 'number' && account.quota_daily_limit > 0 && Number(account.quota_daily_used ?? 0) >= account.quota_daily_limit) {
+    reasons.push({ key: 'daily_quota_exhausted', detail: `${account.quota_daily_used ?? 0}/${account.quota_daily_limit}` })
+  }
+  if (typeof account.quota_weekly_limit === 'number' && account.quota_weekly_limit > 0 && Number(account.quota_weekly_used ?? 0) >= account.quota_weekly_limit) {
+    reasons.push({ key: 'weekly_quota_exhausted', detail: `${account.quota_weekly_used ?? 0}/${account.quota_weekly_limit}` })
+  }
+
+  if (account.session_window_status === 'rejected') {
+    reasons.push({ key: 'session_window_rejected' })
+  }
+
+  if (model && !accountAllowsModel(account, model)) {
+    reasons.push({ key: 'model_not_allowed', detail: model })
+  }
+
+  return {
+    account,
+    available: reasons.length === 0,
+    reasons
+  }
+}
+
+export function diagnoseSchedulerAccounts(
+  accounts: Account[],
+  detail: OpsErrorDetail | null,
+  now = Date.now()
+): ErrorAnalysisAccountDiagnostic[] {
+  return accounts.map((account) => diagnoseSchedulerAccount(account, detail, now))
 }

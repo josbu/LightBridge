@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { OpsErrorDetail } from '@/api/admin/ops'
-import { buildErrorAnalysis } from './errorAnalysis'
+import type { Account } from '@/types'
+import { buildErrorAnalysis, diagnoseSchedulerAccount } from './errorAnalysis'
 
 function makeDetail(overrides: Partial<OpsErrorDetail> = {}): OpsErrorDetail {
   return {
@@ -30,6 +31,38 @@ function makeDetail(overrides: Partial<OpsErrorDetail> = {}): OpsErrorDetail {
     error_body: '{"error":{"message":"No available accounts"}}',
     user_agent: 'vitest',
     is_business_limited: false,
+    ...overrides
+  }
+}
+
+function makeAccount(overrides: Partial<Account> = {}): Account {
+  return {
+    id: 42,
+    name: 'primary',
+    platform: 'custom' as any,
+    type: 'api_key' as any,
+    credentials: {},
+    proxy_id: null,
+    concurrency: 2,
+    current_concurrency: 0,
+    priority: 1,
+    status: 'active',
+    error_message: null,
+    last_used_at: null,
+    expires_at: null,
+    auto_pause_on_expired: false,
+    created_at: '2026-06-25T10:00:00Z',
+    updated_at: '2026-06-25T10:00:00Z',
+    group_ids: [7],
+    schedulable: true,
+    rate_limited_at: null,
+    rate_limit_reset_at: null,
+    overload_until: null,
+    temp_unschedulable_until: null,
+    temp_unschedulable_reason: null,
+    session_window_start: null,
+    session_window_end: null,
+    session_window_status: null,
     ...overrides
   }
 }
@@ -98,5 +131,26 @@ describe('buildErrorAnalysis', () => {
     expect(analysis.confidence).toBe('high')
     expect(analysis.steps.find((step) => step.key === 'account_scheduler')?.state).toBe('passed')
     expect(analysis.steps.find((step) => step.key === 'upstream')?.state).toBe('failed')
+  })
+
+  it('explains why a scheduler candidate account is unavailable', () => {
+    const detail = makeDetail({ group_id: 7, requested_model: 'gpt-4o-mini' })
+    const diagnostic = diagnoseSchedulerAccount(makeAccount({
+      status: 'error',
+      error_message: 'invalid token',
+      schedulable: false,
+      rate_limit_reset_at: '2026-06-25T10:30:00Z',
+      current_concurrency: 2,
+      extra: { model_whitelist: ['gpt-4o'] }
+    }), detail, new Date('2026-06-25T10:00:00Z').getTime())
+
+    expect(diagnostic.available).toBe(false)
+    expect(diagnostic.reasons.map((reason) => reason.key)).toEqual(expect.arrayContaining([
+      'status_error',
+      'unschedulable',
+      'rate_limited',
+      'concurrency_full',
+      'model_not_allowed'
+    ]))
   })
 })

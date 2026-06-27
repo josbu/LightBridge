@@ -1,66 +1,38 @@
 <template>
   <AppLayout>
     <div class="space-y-5">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('admin.ops.errorAnalysis.title') }}</h1>
-          <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
-            {{ t('admin.ops.errorAnalysis.description') }}
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="w-36">
-            <Select :model-value="timeRange" :options="timeRangeOptions" @update:model-value="timeRange = String($event || '24h')" />
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <div class="min-w-[240px] flex-1 sm:max-w-md">
+          <div class="relative">
+            <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="input w-full pl-9 text-sm"
+              :placeholder="t('admin.ops.errorAnalysis.searchPlaceholder')"
+            />
           </div>
-          <div class="w-32">
-            <Select :model-value="statusCodeFilter" :options="statusOptions" @update:model-value="statusCodeFilter = String($event || '')" />
-          </div>
-          <button type="button" class="btn btn-secondary" :disabled="loadingList" @click="fetchRequestErrors({ keepSelection: false })">
-            <Icon name="refresh" size="sm" :class="loadingList ? 'animate-spin' : ''" />
-            <span>{{ t('common.refresh') }}</span>
-          </button>
         </div>
+        <div class="w-36">
+          <Select :model-value="timeRange" :options="timeRangeOptions" @update:model-value="timeRange = String($event || '24h')" />
+        </div>
+        <div class="w-32">
+          <Select :model-value="statusCodeFilter" :options="statusOptions" @update:model-value="statusCodeFilter = String($event || '')" />
+        </div>
+        <button type="button" class="btn btn-secondary" :disabled="loadingList" @click="fetchRequestErrors({ keepSelection: false })">
+          <Icon name="refresh" size="sm" :class="loadingList ? 'animate-spin' : ''" />
+          <span>{{ t('common.refresh') }}</span>
+        </button>
       </div>
 
       <div class="grid min-h-[720px] grid-cols-1 gap-5 xl:grid-cols-[440px_minmax(0,1fr)]">
         <section class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900">
           <div class="border-b border-gray-200 p-4 dark:border-dark-700">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <h2 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.errorAnalysis.requestList') }}</h2>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.ops.errorAnalysis.total', { total }) }}
-                </p>
-              </div>
-              <div class="flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
-                <button
-                  v-for="quick in quickStatusFilters"
-                  :key="quick.value"
-                  type="button"
-                  :class="[
-                    'rounded-md px-2.5 py-1 text-xs font-bold transition-colors',
-                    statusCodeFilter === quick.value
-                      ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300'
-                      : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
-                  ]"
-                  @click="statusCodeFilter = quick.value"
-                >
-                  {{ quick.label }}
-                </button>
-              </div>
-            </div>
-
-            <div class="mt-3">
-              <div class="relative">
-                <Icon name="search" size="sm" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  v-model="searchQuery"
-                  type="text"
-                  class="input w-full pl-9 text-sm"
-                  :placeholder="t('admin.ops.errorAnalysis.searchPlaceholder')"
-                />
-              </div>
+            <div>
+              <h2 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.errorAnalysis.requestList') }}</h2>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.ops.errorAnalysis.total', { total }) }}
+              </p>
             </div>
           </div>
 
@@ -126,15 +98,60 @@
             </template>
           </div>
 
-          <Pagination
+          <div
             v-if="total > 0"
-            :total="total"
-            :page="page"
-            :page-size="pageSize"
-            :show-jump="false"
-            @update:page="handlePageChange"
-            @update:pageSize="handlePageSizeChange"
-          />
+            class="border-t border-gray-200 bg-white px-3 py-3 dark:border-dark-700 dark:bg-dark-800"
+          >
+            <div class="flex flex-col gap-2">
+              <div class="whitespace-nowrap text-xs text-gray-600 dark:text-gray-300">
+                {{ t('pagination.showing') }}
+                <span class="font-semibold">{{ fromItem }}</span>
+                {{ t('pagination.to') }}
+                <span class="font-semibold">{{ toItem }}</span>
+                {{ t('pagination.of') }}
+                <span class="font-semibold">{{ total }}</span>
+                {{ t('pagination.results') }}
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+                  :disabled="page === 1"
+                  :aria-label="t('pagination.previous')"
+                  @click="handlePageChange(page - 1)"
+                >
+                  <Icon name="chevronLeft" size="sm" />
+                </button>
+                <div class="flex min-w-0 items-center justify-center gap-1 overflow-hidden">
+                  <button
+                    v-for="(pageNum, pageIndex) in compactVisiblePages"
+                    :key="`${pageNum}-${pageIndex}`"
+                    type="button"
+                    :disabled="typeof pageNum !== 'number'"
+                    :class="[
+                      'inline-flex h-8 min-w-8 items-center justify-center rounded border px-2 text-xs font-semibold',
+                      pageNum === page
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                        : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600',
+                      typeof pageNum !== 'number' && 'cursor-default border-transparent bg-transparent px-1 text-gray-400 hover:bg-transparent dark:bg-transparent'
+                    ]"
+                    @click="typeof pageNum === 'number' && handlePageChange(pageNum)"
+                  >
+                    {{ pageNum }}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+                  :disabled="page === totalPages"
+                  :aria-label="t('pagination.next')"
+                  @click="handlePageChange(page + 1)"
+                >
+                  <Icon name="chevronRight" size="sm" />
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="min-h-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900">
@@ -268,6 +285,77 @@
                         {{ t('admin.ops.errorAnalysis.noEvidence') }}
                       </div>
                     </div>
+
+                    <div v-if="step.key === 'account_scheduler'" class="mt-4 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900">
+                      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div class="text-xs font-bold text-gray-900 dark:text-white">
+                            {{ t('admin.ops.errorAnalysis.schedulerAccounts.title') }}
+                          </div>
+                          <div class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                            {{ selectedDetail?.group_name || selectedDetail?.group_id || '-' }} ·
+                            {{ t('admin.ops.errorAnalysis.schedulerAccounts.availableCount', { available: availableSchedulerAccountCount, total: schedulerAccountDiagnostics.length }) }}
+                          </div>
+                        </div>
+                        <div v-if="loadingSchedulerAccounts" class="flex items-center gap-2 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                          <Icon name="refresh" size="xs" class="animate-spin" />
+                          <span>{{ t('admin.ops.errorAnalysis.schedulerAccounts.loading') }}</span>
+                        </div>
+                      </div>
+
+                      <div v-if="!loadingSchedulerAccounts && schedulerAccountDiagnostics.length === 0" class="mt-3 rounded border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
+                        {{ selectedDetail?.group_id ? t('admin.ops.errorAnalysis.schedulerAccounts.empty') : t('admin.ops.errorAnalysis.schedulerAccounts.noGroup') }}
+                      </div>
+
+                      <div v-else class="mt-3 space-y-2">
+                        <div
+                          v-if="!loadingSchedulerAccounts && availableSchedulerAccountCount === 0 && schedulerAccountDiagnostics.length > 0"
+                          class="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-900/10 dark:text-red-300"
+                        >
+                          {{ t('admin.ops.errorAnalysis.schedulerAccounts.noneAvailable') }}
+                        </div>
+
+                        <div
+                          v-for="diagnostic in schedulerAccountDiagnostics"
+                          :key="diagnostic.account.id"
+                          class="rounded border border-gray-200 px-3 py-2 dark:border-dark-700"
+                        >
+                          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div class="min-w-0">
+                              <div class="flex min-w-0 items-center gap-2">
+                                <span :class="['inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ring-1 ring-inset', diagnostic.available ? 'bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-500/30' : 'bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-500/30']">
+                                  {{ diagnostic.available ? t('admin.ops.errorAnalysis.schedulerAccounts.available') : t('admin.ops.errorAnalysis.schedulerAccounts.unavailable') }}
+                                </span>
+                                <span class="truncate text-xs font-bold text-gray-900 dark:text-white">
+                                  {{ accountDisplayLabel(diagnostic.account) }}
+                                </span>
+                              </div>
+                              <div class="mt-1 flex flex-wrap gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+                                <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-dark-800">#{{ diagnostic.account.id }}</span>
+                                <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-dark-800">{{ diagnostic.account.platform }}</span>
+                                <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-dark-800">{{ diagnostic.account.status }}</span>
+                              </div>
+                            </div>
+                            <div class="text-[11px] text-gray-500 dark:text-gray-400">
+                              {{ formatAccountCapacity(diagnostic.account) }}
+                            </div>
+                          </div>
+
+                          <div v-if="diagnostic.reasons.length > 0" class="mt-2 space-y-1">
+                            <div
+                              v-for="reason in diagnostic.reasons"
+                              :key="`${diagnostic.account.id}-${reason.key}-${reason.detail || ''}`"
+                              class="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700 dark:bg-red-900/10 dark:text-red-300"
+                            >
+                              {{ accountReasonLabel(reason) }}
+                            </div>
+                          </div>
+                          <div v-else class="mt-2 rounded bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700 dark:bg-emerald-900/10 dark:text-emerald-300">
+                            {{ t('admin.ops.errorAnalysis.schedulerAccounts.noBlockingReason') }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -338,12 +426,21 @@ import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import { useAppStore } from '@/stores'
+import { adminAPI } from '@/api/admin'
 import { opsAPI, type OpsErrorDetail, type OpsErrorLog, type OpsErrorListQueryParams } from '@/api/admin/ops'
+import type { Account } from '@/types'
 import { formatDateTime } from './utils/opsFormatters'
-import { buildErrorAnalysis, shortErrorMessage, type ErrorAnalysisStepState } from './utils/errorAnalysis'
+import {
+  accountDisplayLabel,
+  buildErrorAnalysis,
+  diagnoseSchedulerAccounts,
+  shortErrorMessage,
+  type ErrorAnalysisAccountDiagnostic,
+  type ErrorAnalysisAccountReason,
+  type ErrorAnalysisStepState
+} from './utils/errorAnalysis'
 import { resolvePrimaryResponseBody } from './utils/errorDetailResponse'
 
 const { t } = useI18n()
@@ -363,9 +460,12 @@ const selectedErrorId = ref<number | null>(null)
 const selectedDetail = ref<OpsErrorDetail | null>(null)
 const correlatedUpstreamErrors = ref<OpsErrorDetail[]>([])
 const showRaw = ref(false)
+const loadingSchedulerAccounts = ref(false)
+const schedulerAccounts = ref<Account[]>([])
 
 let listFetchSeq = 0
 let detailFetchSeq = 0
+let schedulerAccountFetchSeq = 0
 
 const timeRangeOptions = computed(() => [
   { value: '5m', label: t('admin.ops.timeRange.5m') },
@@ -387,14 +487,22 @@ const statusOptions = computed(() => [
   { value: '504', label: '504' }
 ])
 
-const quickStatusFilters = computed(() => [
-  { value: '', label: t('common.all') },
-  { value: '403', label: '403' },
-  { value: '503', label: '503' }
-])
-
 const analysis = computed(() => buildErrorAnalysis(selectedDetail.value, correlatedUpstreamErrors.value))
 const primaryResponseBody = computed(() => resolvePrimaryResponseBody(selectedDetail.value, 'request'))
+const schedulerAccountDiagnostics = computed<ErrorAnalysisAccountDiagnostic[]>(() => diagnoseSchedulerAccounts(schedulerAccounts.value, selectedDetail.value))
+const availableSchedulerAccountCount = computed(() => schedulerAccountDiagnostics.value.filter((item) => item.available).length)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const fromItem = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1)
+const toItem = computed(() => Math.min(page.value * pageSize.value, total.value))
+const compactVisiblePages = computed<(number | string)[]>(() => {
+  const totalPageCount = totalPages.value
+  if (totalPageCount <= 5) return Array.from({ length: totalPageCount }, (_, idx) => idx + 1)
+
+  if (page.value <= 3) return [1, 2, 3, '...', totalPageCount]
+  if (page.value >= totalPageCount - 2) return [1, '...', totalPageCount - 2, totalPageCount - 1, totalPageCount]
+  return [1, '...', page.value, '...', totalPageCount]
+})
 
 async function fetchRequestErrors(options: { keepSelection?: boolean } = {}) {
   const fetchSeq = ++listFetchSeq
@@ -424,6 +532,7 @@ async function fetchRequestErrors(options: { keepSelection?: boolean } = {}) {
         selectedErrorId.value = null
         selectedDetail.value = null
         correlatedUpstreamErrors.value = []
+        schedulerAccounts.value = []
       }
     }
   } catch (err: any) {
@@ -441,8 +550,11 @@ async function fetchRequestErrors(options: { keepSelection?: boolean } = {}) {
 async function selectError(id: number) {
   if (!id) return
   const fetchSeq = ++detailFetchSeq
+  schedulerAccountFetchSeq++
   selectedErrorId.value = id
   showRaw.value = false
+  schedulerAccounts.value = []
+  loadingSchedulerAccounts.value = false
   loadingDetail.value = true
   try {
     const [detail, upstream] = await Promise.all([
@@ -453,6 +565,7 @@ async function selectError(id: number) {
 
     selectedDetail.value = detail
     correlatedUpstreamErrors.value = upstream.items || []
+    fetchSchedulerAccounts(detail)
   } catch (err: any) {
     if (fetchSeq !== detailFetchSeq || selectedErrorId.value !== id) return
 
@@ -460,19 +573,50 @@ async function selectError(id: number) {
     appStore.showError(err?.message || t('admin.ops.errorAnalysis.failedToLoadDetail'))
     selectedDetail.value = null
     correlatedUpstreamErrors.value = []
+    schedulerAccounts.value = []
   } finally {
     if (fetchSeq === detailFetchSeq && selectedErrorId.value === id) loadingDetail.value = false
   }
 }
 
-function handlePageChange(next: number) {
-  page.value = next
-  fetchRequestErrors({ keepSelection: false })
+async function fetchSchedulerAccounts(detail: OpsErrorDetail | null) {
+  const fetchSeq = ++schedulerAccountFetchSeq
+  schedulerAccounts.value = []
+  if (!detail?.group_id) return
+
+  loadingSchedulerAccounts.value = true
+  try {
+    const pageSize = 100
+    let nextPage = 1
+    let totalAccounts = 0
+    const items: Account[] = []
+
+    do {
+      const res = await adminAPI.accounts.list(nextPage, pageSize, {
+        group: String(detail.group_id),
+        sort_by: 'priority',
+        sort_order: 'desc'
+      })
+      if (fetchSeq !== schedulerAccountFetchSeq) return
+
+      items.push(...(res.items || []))
+      totalAccounts = res.total || items.length
+      nextPage += 1
+    } while (items.length < totalAccounts)
+
+    if (fetchSeq !== schedulerAccountFetchSeq) return
+    schedulerAccounts.value = items
+  } catch (err: any) {
+    if (fetchSeq !== schedulerAccountFetchSeq) return
+    console.error('[ErrorAnalysisView] Failed to load scheduler accounts', err)
+    appStore.showError(err?.message || t('admin.ops.errorAnalysis.failedToLoadSchedulerAccounts'))
+  } finally {
+    if (fetchSeq === schedulerAccountFetchSeq) loadingSchedulerAccounts.value = false
+  }
 }
 
-function handlePageSizeChange(next: number) {
-  pageSize.value = next
-  page.value = 1
+function handlePageChange(next: number) {
+  page.value = next
   fetchRequestErrors({ keepSelection: false })
 }
 
@@ -584,6 +728,19 @@ function evidenceLabel(key: string): string {
   const translated = t(`admin.ops.errorAnalysis.evidence.${key}`)
   if (translated !== `admin.ops.errorAnalysis.evidence.${key}`) return translated
   return key
+}
+
+function accountReasonLabel(reason: ErrorAnalysisAccountReason): string {
+  const translated = t(`admin.ops.errorAnalysis.schedulerAccounts.reason.${reason.key}`)
+  const base = translated !== `admin.ops.errorAnalysis.schedulerAccounts.reason.${reason.key}` ? translated : reason.key
+  return reason.detail ? `${base}: ${reason.detail}` : base
+}
+
+function formatAccountCapacity(account: Account): string {
+  const parts: string[] = []
+  if (account.concurrency > 0) parts.push(`CC ${account.current_concurrency ?? 0}/${account.concurrency}`)
+  if (account.base_rpm && account.base_rpm > 0) parts.push(`RPM ${account.current_rpm ?? 0}/${account.base_rpm}`)
+  return parts.join(' · ') || '-'
 }
 
 function prettyJSON(raw?: string): string {
