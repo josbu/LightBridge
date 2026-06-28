@@ -412,6 +412,7 @@ export default {
     documentList: 'Document list',
     toc: 'Contents',
     noToc: 'No headings yet',
+    goToConsole: 'Go to Console',
   },
 
   // Auth
@@ -3465,6 +3466,15 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
+      relayMode: {
+        label: 'Relay mode',
+        router: 'Router',
+        routerDesc: 'Allow the protocol router to convert between OpenAI Responses, Chat Completions, Claude Messages, and Gemini.',
+        passthrough: 'Passthrough (same protocol)',
+        passthroughDesc: 'Forward only when the inbound and target protocols are the same, bypassing router conversion.',
+        fullPassthrough: 'Full passthrough (raw forwarding)',
+        fullPassthroughDesc: 'Forward the request and upstream response as-is for any protocol, replacing only authentication and required headers.'
+      },
       // OpenAI specific hints
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',

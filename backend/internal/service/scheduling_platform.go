@@ -52,6 +52,23 @@ func schedulingQueryPlatforms(platform string, useMixed bool) []string {
 	}
 }
 
+func schedulingQueryPlatformsForRequest(ctx context.Context, platform string, useMixed bool) []string {
+	inbound := InboundProtocolFromContext(ctx)
+	if inbound == "" || !IsMessageProtocol(inbound) {
+		if useMixed {
+			return schedulingQueryPlatforms(platform, useMixed)
+		}
+		if platform == PlatformAntigravity {
+			return []string{PlatformGemini}
+		}
+		return []string{platform}
+	}
+	if platform == PlatformAntigravity {
+		return []string{PlatformGemini}
+	}
+	return []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformCustom}
+}
+
 // accountServesSchedulingPlatform 判断账号是否可进入给定调度目标平台（别名）的**候选集**。
 //
 // 这是「候选级」判定（与入站 endpoint 无关）。Custom 账号的 protocol 匹配在请求级由
@@ -77,20 +94,26 @@ func accountServesSchedulingPlatform(a *Account, platform string, useMixed bool)
 	return a.Platform == platform
 }
 
-// requiredProtocolFromContext 读取 handler 依入站 endpoint 注入的请求级所需协议。
-// 为空表示当前上下文无协议约束（如非网关请求/测试），此时不对 Custom 账号做协议过滤。
-func requiredProtocolFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
+func accountServesRequestPlatform(ctx context.Context, a *Account, platform string, useMixed bool) bool {
+	if a == nil {
+		return false
 	}
-	if v, ok := ctx.Value(ctxkey.RequiredProtocol).(string); ok {
-		return v
+	if forcePlatform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && forcePlatform != "" {
+		return accountServesSchedulingPlatform(a, platform, useMixed)
 	}
-	return ""
+	if InboundProtocolFromContext(ctx) != "" {
+		return true
+	}
+	return accountServesSchedulingPlatform(a, platform, useMixed)
 }
 
-// filterAccountsByRequestProtocol 按请求级所需协议过滤候选账号：
-// Custom 账号当且仅当其 protocol == requiredProtocol 时保留；非 Custom 账号一律保留。
+// requiredProtocolFromContext 读取 handler 依入站 endpoint 注入的请求级入站协议。
+// 为空表示当前上下文无协议约束（如非网关请求/测试），此时不做协议过滤。
+func requiredProtocolFromContext(ctx context.Context) string {
+	return InboundProtocolFromContext(ctx)
+}
+
+// filterAccountsByRequestProtocol 按请求级入站协议和账号 relay_mode 过滤候选账号。
 // requiredProtocol 为空时原样返回（不过滤）。返回新切片，不修改入参底层数组（避免污染快照缓存）。
 func filterAccountsByRequestProtocol(ctx context.Context, accounts []Account) []Account {
 	required := requiredProtocolFromContext(ctx)
@@ -99,7 +122,7 @@ func filterAccountsByRequestProtocol(ctx context.Context, accounts []Account) []
 	}
 	out := make([]Account, 0, len(accounts))
 	for i := range accounts {
-		if accounts[i].IsCustom() && accounts[i].CustomProtocol() != required {
+		if _, ok := ProtocolRouteDecisionForAccountProtocols(required, &accounts[i]); !ok {
 			continue
 		}
 		out = append(out, accounts[i])
@@ -108,11 +131,12 @@ func filterAccountsByRequestProtocol(ctx context.Context, accounts []Account) []
 }
 
 // accountMatchesRequestProtocol 判断单个账号是否满足请求级协议约束（用于 sticky session
-// 等按 ID 取账号、绕过候选列表过滤的路径）。非 Custom 账号或无协议约束时恒为真。
+// 等按 ID 取账号、绕过候选列表过滤的路径）。无协议约束时恒为真。
 func accountMatchesRequestProtocol(ctx context.Context, a *Account) bool {
 	required := requiredProtocolFromContext(ctx)
-	if required == "" || a == nil || !a.IsCustom() {
+	if required == "" || a == nil {
 		return true
 	}
-	return a.CustomProtocol() == required
+	_, ok := ProtocolRouteDecisionForAccountProtocols(required, a)
+	return ok
 }

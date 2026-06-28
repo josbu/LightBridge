@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"strings"
 	"time"
 
 	"github.com/WilliamWang1721/LightBridge/internal/pkg/ctxkey"
@@ -56,6 +57,7 @@ func Logger() gin.HandlerFunc {
 		if model != "" {
 			fields = append(fields, zap.String("model", model))
 		}
+		fields = appendProtocolRouteAccessFields(fields, c.Request.Context())
 
 		l := logger.FromContext(c.Request.Context()).With(fields...)
 		l.Info("http request completed", zap.Time("completed_at", endTime))
@@ -64,4 +66,35 @@ func Logger() gin.HandlerFunc {
 			l.Warn("http request contains gin errors", zap.String("errors", c.Errors.String()))
 		}
 	}
+}
+
+func appendProtocolRouteAccessFields(fields []zap.Field, ctx interface {
+	Value(key any) any
+}) []zap.Field {
+	if ctx == nil {
+		return fields
+	}
+	if value, ok := ctx.Value(ctxkey.InboundProtocol).(string); ok && strings.TrimSpace(value) != "" {
+		fields = append(fields, zap.String("inbound_protocol", strings.TrimSpace(value)))
+	}
+	if value, ok := ctx.Value(ctxkey.TargetProtocol).(string); ok && strings.TrimSpace(value) != "" {
+		fields = append(fields, zap.String("target_protocol", strings.TrimSpace(value)))
+	}
+	if value, ok := ctx.Value(ctxkey.RelayMode).(string); ok && strings.TrimSpace(value) != "" {
+		fields = append(fields, zap.String("relay_mode", strings.TrimSpace(value)))
+	}
+	switch value := ctx.Value(ctxkey.ConversionChain).(type) {
+	case string:
+		if strings.TrimSpace(value) != "" {
+			fields = append(fields, zap.String("conversion_chain", strings.TrimSpace(value)))
+		}
+	case []string:
+		if len(value) > 0 {
+			fields = append(fields, zap.String("conversion_chain", strings.Join(value, " -> ")))
+		}
+	}
+	if value, ok := ctx.Value(ctxkey.FinalRelayFormat).(string); ok && strings.TrimSpace(value) != "" {
+		fields = append(fields, zap.String("final_relay_format", strings.TrimSpace(value)))
+	}
+	return fields
 }

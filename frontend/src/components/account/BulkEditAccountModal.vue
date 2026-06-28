@@ -31,7 +31,7 @@
         </p>
       </div>
 
-      <!-- OpenAI passthrough -->
+      <!-- OpenAI full passthrough -->
       <div
         v-if="allOpenAIPassthroughCapable"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -43,10 +43,10 @@
               class="input-label mb-0"
               for="bulk-edit-openai-passthrough-enabled"
             >
-              {{ t('admin.accounts.openai.oauthPassthrough') }}
+              {{ t('admin.accounts.relayMode.fullPassthrough') }}
             </label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+              {{ t('admin.accounts.relayMode.fullPassthroughDesc') }}
             </p>
           </div>
           <input
@@ -1157,6 +1157,7 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
+import { RELAY_MODE_FULL_PASSTHROUGH, RELAY_MODE_ROUTER, writeRelayModeToExtra } from '@/utils/relayMode'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1485,8 +1486,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (enableOpenAIPassthrough.value) {
     const extra = ensureExtra()
-    extra.openai_passthrough = openaiPassthroughEnabled.value
-    if (!openaiPassthroughEnabled.value) {
+    if (openaiPassthroughEnabled.value) {
+      writeRelayModeToExtra(extra, RELAY_MODE_FULL_PASSTHROUGH)
+    } else {
+      extra.relay_mode = RELAY_MODE_ROUTER
+      extra.openai_passthrough = false
       extra.openai_oauth_passthrough = false
     }
   }

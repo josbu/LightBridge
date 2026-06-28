@@ -77,7 +77,7 @@ func setCustomRequiredProtocol(c *gin.Context, protocol string) {
 	if c == nil || c.Request == nil || strings.TrimSpace(protocol) == "" {
 		return
 	}
-	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequiredProtocol, strings.TrimSpace(protocol)))
+	c.Request = c.Request.WithContext(service.WithInboundProtocol(c.Request.Context(), strings.TrimSpace(protocol)))
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler

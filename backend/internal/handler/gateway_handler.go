@@ -40,6 +40,7 @@ var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 // GatewayHandler handles API gateway requests
 type GatewayHandler struct {
 	gatewayService            *service.GatewayService
+	openAIGatewayService      *service.OpenAIGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
 	userService               *service.UserService
@@ -64,6 +65,7 @@ type GatewayHandler struct {
 // NewGatewayHandler creates a new GatewayHandler
 func NewGatewayHandler(
 	gatewayService *service.GatewayService,
+	openAIGatewayService *service.OpenAIGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
 	userService *service.UserService,
@@ -101,6 +103,7 @@ func NewGatewayHandler(
 
 	return &GatewayHandler{
 		gatewayService:            gatewayService,
+		openAIGatewayService:      openAIGatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
 		userService:               userService,
@@ -127,13 +130,6 @@ func (h *GatewayHandler) SetAistudioProxyManager(m *aistudio_proxy.Manager) {
 	if h != nil {
 		h.aistudioProxyManager = m
 	}
-}
-
-func protocolForGatewayCompatPlatform(platform string) string {
-	if platform == service.PlatformGemini {
-		return service.CustomProtocolGemini
-	}
-	return service.CustomProtocolAnthropicMessages
 }
 
 // Messages handles Claude API compatible messages endpoint
@@ -312,7 +308,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	} else if apiKey.Group != nil {
 		platform = apiKey.Group.Platform
 	}
-	setCustomRequiredProtocol(c, protocolForGatewayCompatPlatform(platform))
+	setCustomRequiredProtocol(c, service.CustomProtocolAnthropicMessages)
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -459,7 +455,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 账号槽位/等待计数需要在超时或断开时安全回收
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
-			// 转发请求 - 根据账号平台分流
+			// 转发请求 - 根据 Router 决策分流到目标协议栈
+			var forwarded protocolForwardResult
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
 			if fs.SwitchCount > 0 {
@@ -467,13 +464,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.IsCustom() && account.CustomProtocol() == service.CustomProtocolAnthropicMessages {
-				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
-			} else if account.IsAntigravity() {
-				result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, hasBoundSession)
-			} else {
-				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
+			promptCacheKey := ""
+			if h.openAIGatewayService != nil {
+				promptCacheKey = h.openAIGatewayService.ExtractSessionID(c, body)
 			}
+			forwarded, err = h.forwardMessagesViaProtocolRouter(requestCtx, c, account, body, parsedReq, promptCacheKey, "", hasBoundSession)
+			result = forwarded.GatewayResult()
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
@@ -540,6 +536,34 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			if forwarded.OpenAI != nil {
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.openAIGatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+						Result:             forwarded.OpenAI,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Subscription:       subscription,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						RequestPayloadHash: requestPayloadHash,
+						APIKeyService:      h.apiKeyService,
+						ChannelUsageFields: channelMapping.ToUsageFields(reqModel, forwarded.OpenAI.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Any("group_id", apiKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+				return
+			}
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -782,8 +806,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			parsedReq.Body = h.gatewayService.ApplyBedrockCCCompat(c.Request.Context(), parsedReq.Body, parsedReq.Model, account, apiKey.GroupID)
 			body = parsedReq.Body
 
-			// 转发请求 - 根据账号平台分流
+			// 转发请求 - 根据 Router 决策分流到目标协议栈
 			c.Set("parsed_request", parsedReq)
+			var forwarded protocolForwardResult
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
 			if fs.SwitchCount > 0 {
@@ -791,11 +816,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.IsAntigravity() && account.Type != service.AccountTypeAPIKey {
-				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, body, hasBoundSession)
-			} else {
-				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
+			promptCacheKey := ""
+			if h.openAIGatewayService != nil {
+				promptCacheKey = h.openAIGatewayService.ExtractSessionID(c, body)
 			}
+			forwarded, err = h.forwardMessagesViaProtocolRouter(requestCtx, c, account, body, parsedReq, promptCacheKey, "", hasBoundSession)
+			result = forwarded.GatewayResult()
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -935,6 +961,34 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
+			if forwarded.OpenAI != nil {
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.openAIGatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+						Result:             forwarded.OpenAI,
+						APIKey:             currentAPIKey,
+						User:               currentAPIKey.User,
+						Account:            account,
+						Subscription:       currentSubscription,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						RequestPayloadHash: requestPayloadHash,
+						APIKeyService:      h.apiKeyService,
+						ChannelUsageFields: channelMapping.ToUsageFields(reqModel, forwarded.OpenAI.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", currentAPIKey.ID),
+							zap.Any("group_id", currentAPIKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+				return
+			}
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,

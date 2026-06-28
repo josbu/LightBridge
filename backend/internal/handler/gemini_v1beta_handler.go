@@ -487,31 +487,15 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 账号槽位/等待计数需要在超时或断开时安全回收
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
-		// 5) forward (根据平台分流)
+		// 5) forward (由 ProtocolRouter 决定同协议直转或跨协议转换)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
-		if account.IsAntigravity() && account.Type != service.AccountTypeAPIKey {
-			result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
-		} else {
-			// AIStudio 反代（LB 托管 Bearer）账号：转发前确保其 aistudio-api 子进程已就绪。
-			// EnsureRunning 会把 base_url/api_key 持久化到 account.credentials，ForwardNative 据此转发。
-			if account.UsesBearerAuth() {
-				if upErr := h.ensureAistudioProxy(c.Request.Context(), account); upErr != nil {
-					// 视为可切换的上游错误：交给现有 failover 逻辑切到池内其它账号。
-					if accountReleaseFunc != nil {
-						accountReleaseFunc()
-					}
-					err = upErr
-				} else {
-					result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
-				}
-			} else {
-				result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
-			}
-		}
+		var routed protocolForwardResult
+		routed, err = h.forwardGeminiNativeViaProtocolRouter(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
+		result = routed.GatewayResult()
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
@@ -596,7 +580,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 }
 
 func groupAllowsGeminiNative(group *service.Group) bool {
-	return group != nil && (group.Platform == service.PlatformGemini || group.Platform == service.PlatformCustom)
+	return group != nil
 }
 
 func parseGeminiModelAction(rest string) (model string, action string, err error) {

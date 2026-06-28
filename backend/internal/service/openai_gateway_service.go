@@ -2116,12 +2116,23 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		}
 		return filterAccountsByRequestProtocol(ctx, accounts), nil
 	}
-	// 候选含 Custom 账号（schedulingQueryPlatforms 追加 PlatformCustom）；跨栈由 IsOpenAI 过滤，
-	// 协议子类（responses/chat/embeddings）由 filterAccountsByRequestProtocol 收敛。
-	queryPlatforms := schedulingQueryPlatforms(PlatformOpenAI, false)
+	// 有入站协议的网关请求可调度 OpenAI + Custom(OpenAI 协议)账号；
+	// 无入站协议的内部/旧调用保持单平台查询，避免把老路径升级成多平台 repo 依赖。
+	queryPlatforms := []string{PlatformOpenAI}
+	if InboundProtocolFromContext(ctx) != "" {
+		queryPlatforms = schedulingQueryPlatforms(PlatformOpenAI, false)
+	}
 	var accounts []Account
 	var err error
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	if len(queryPlatforms) == 1 {
+		if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+			accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, queryPlatforms[0])
+		} else if groupID != nil {
+			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, queryPlatforms[0])
+		} else {
+			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, queryPlatforms[0])
+		}
+	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
 	} else if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)

@@ -46,6 +46,13 @@ const (
 	CustomProtocolGemini                = "gemini"                  // Gemini (/v1beta/models)
 )
 
+// Relay mode constants —— 账号参与网关调度时的请求中转模式（存于 accounts.extra["relay_mode"]）。
+const (
+	RelayModeRouter          = "router"           // 允许协议转换，由 ProtocolRouter 决定转换链
+	RelayModePassthrough     = "passthrough"      // 同协议透传，不做协议转换
+	RelayModeFullPassthrough = "full_passthrough" // 完全透传，继承旧的原样转发语义
+)
+
 // Sub-platform constants —— 同一 platform 下的账号变体判别符（accounts.sub_platform）。
 const (
 	// SubPlatformAntigravity 标识 gemini 平台下的 Antigravity 账号。

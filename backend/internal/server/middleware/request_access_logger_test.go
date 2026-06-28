@@ -123,6 +123,11 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxkey.AccountID, int64(101))
 		ctx = context.WithValue(ctx, ctxkey.Platform, "openai")
 		ctx = context.WithValue(ctx, ctxkey.Model, "gpt-5")
+		ctx = context.WithValue(ctx, ctxkey.InboundProtocol, "openai_responses")
+		ctx = context.WithValue(ctx, ctxkey.TargetProtocol, "anthropic_messages")
+		ctx = context.WithValue(ctx, ctxkey.RelayMode, "router")
+		ctx = context.WithValue(ctx, ctxkey.ConversionChain, []string{"openai_responses", "anthropic_messages"})
+		ctx = context.WithValue(ctx, ctxkey.FinalRelayFormat, "anthropic_messages")
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
@@ -173,6 +178,13 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		}
 		if event.Fields["platform"] != "openai" || event.Fields["model"] != "gpt-5" {
 			t.Fatalf("platform/model mismatch: %+v", event.Fields)
+		}
+		if event.Fields["inbound_protocol"] != "openai_responses" ||
+			event.Fields["target_protocol"] != "anthropic_messages" ||
+			event.Fields["relay_mode"] != "router" ||
+			event.Fields["conversion_chain"] != "openai_responses -> anthropic_messages" ||
+			event.Fields["final_relay_format"] != "anthropic_messages" {
+			t.Fatalf("protocol route fields mismatch: %+v", event.Fields)
 		}
 	}
 	if !found {

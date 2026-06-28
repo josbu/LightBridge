@@ -17,10 +17,10 @@ import (
 )
 
 type Account struct {
-	ID          int64
-	Name        string
-	Notes       *string
-	Platform    string
+	ID       int64
+	Name     string
+	Notes    *string
+	Platform string
 	// SubPlatform 是同一 platform 下的子平台/账号变体判别符。
 	// 目前用于在 "gemini" 平台下标识 Antigravity 账号（SubPlatform=="antigravity"）。
 	// 空字符串表示原生平台账号。与 Type 正交。使用 IsAntigravity() 读取。
@@ -83,20 +83,20 @@ const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 // 真 Anthropic 服务端会校验 thinking block 的 signature；伪造/中转套壳通常不会。
 // 主动探针(密码学级)与被动检测(SSE 旁路)都会把结论写入这些键。
 const (
-	AccountExtraKeyAuthenticityVerdict     = "claude_authenticity_verdict"      // genuine / counterfeit / unknown
-	AccountExtraKeyAuthenticityCheckedAt   = "claude_authenticity_checked_at"  // RFC3339
-	AccountExtraKeyAuthenticityMethod      = "claude_authenticity_method"      // probe / passive
-	AccountExtraKeyAuthenticityDetail      = "claude_authenticity_detail"      // 人类可读说明
-	AccountExtraKeyAuthenticitySuspicious  = "claude_authenticity_suspicious_count" // 被动累计可疑次数(number)
+	AccountExtraKeyAuthenticityVerdict    = "claude_authenticity_verdict"          // genuine / counterfeit / unknown
+	AccountExtraKeyAuthenticityCheckedAt  = "claude_authenticity_checked_at"       // RFC3339
+	AccountExtraKeyAuthenticityMethod     = "claude_authenticity_method"           // probe / passive
+	AccountExtraKeyAuthenticityDetail     = "claude_authenticity_detail"           // 人类可读说明
+	AccountExtraKeyAuthenticitySuspicious = "claude_authenticity_suspicious_count" // 被动累计可疑次数(number)
 )
 
 // 真伪检测结论枚举。
 const (
-	AuthenticityVerdictGenuine      = "genuine"
-	AuthenticityVerdictCounterfeit  = "counterfeit"
-	AuthenticityVerdictUnknown      = "unknown"
-	AuthenticityMethodProbe         = "probe"
-	AuthenticityMethodPassive       = "passive"
+	AuthenticityVerdictGenuine     = "genuine"
+	AuthenticityVerdictCounterfeit = "counterfeit"
+	AuthenticityVerdictUnknown     = "unknown"
+	AuthenticityMethodProbe        = "probe"
+	AuthenticityMethodPassive      = "passive"
 )
 
 type TempUnschedulableRule struct {
@@ -240,6 +240,121 @@ func (a *Account) CustomProtocol() string {
 		return ""
 	}
 	return strings.TrimSpace(a.GetExtraString("protocol"))
+}
+
+// RelayMode 返回账号的中转模式。缺省为 router；旧 passthrough 布尔字段按
+// full_passthrough 兼容，以保留历史“原样转发，仅替换认证”的语义。
+func (a *Account) RelayMode() string {
+	if a == nil {
+		return RelayModeRouter
+	}
+	if a.Extra != nil {
+		if mode, ok := a.Extra["relay_mode"].(string); ok {
+			switch strings.ToLower(strings.TrimSpace(mode)) {
+			case RelayModeRouter:
+				return RelayModeRouter
+			case RelayModePassthrough:
+				return RelayModePassthrough
+			case RelayModeFullPassthrough:
+				return RelayModeFullPassthrough
+			}
+		}
+	}
+	if a.legacyFullPassthroughEnabled() {
+		return RelayModeFullPassthrough
+	}
+	return RelayModeRouter
+}
+
+func (a *Account) legacyFullPassthroughEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	if a.IsOpenAI() {
+		if enabled, ok := a.Extra["openai_passthrough"].(bool); ok && enabled {
+			return true
+		}
+		if enabled, ok := a.Extra["openai_oauth_passthrough"].(bool); ok && enabled {
+			return true
+		}
+	}
+	if a.IsAnthropic() && a.Type == AccountTypeAPIKey {
+		if enabled, ok := a.Extra["anthropic_passthrough"].(bool); ok && enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Account) IsFullPassthroughEnabled() bool {
+	return a != nil && a.RelayMode() == RelayModeFullPassthrough
+}
+
+func (a *Account) IsSameProtocolPassthroughEnabled() bool {
+	return a != nil && a.RelayMode() == RelayModePassthrough
+}
+
+// TargetProtocol 返回账号默认出站协议。Custom 账号使用显式 protocol；原生平台
+// 使用其主协议栈。Antigravity 在 SupportedTargetProtocols 中额外声明双协议能力。
+func (a *Account) TargetProtocol() string {
+	if a == nil {
+		return ""
+	}
+	if a.IsCustom() {
+		return a.CustomProtocol()
+	}
+	if a.IsOpenAI() {
+		return CustomProtocolOpenAIResponses
+	}
+	if a.IsAnthropic() {
+		return CustomProtocolAnthropicMessages
+	}
+	if a.IsGemini() {
+		return CustomProtocolGemini
+	}
+	return ""
+}
+
+func (a *Account) SupportedTargetProtocols() []string {
+	if a == nil {
+		return nil
+	}
+	if a.IsCustom() {
+		if proto := a.CustomProtocol(); proto != "" {
+			return []string{proto}
+		}
+		return nil
+	}
+	if a.IsAntigravity() {
+		return []string{CustomProtocolAnthropicMessages, CustomProtocolGemini}
+	}
+	if a.IsOpenAI() {
+		return []string{
+			CustomProtocolOpenAIResponses,
+			CustomProtocolOpenAIChatCompletions,
+			CustomProtocolOpenAIEmbeddings,
+		}
+	}
+	if a.IsAnthropic() {
+		return []string{CustomProtocolAnthropicMessages}
+	}
+	if a.IsGemini() {
+		return []string{CustomProtocolGemini}
+	}
+	return nil
+}
+
+func (a *Account) SupportsTargetProtocol(protocol string) bool {
+	protocol = strings.TrimSpace(protocol)
+	if protocol == "" {
+		return false
+	}
+	for _, supported := range a.SupportedTargetProtocols() {
+		if supported == protocol {
+			return true
+		}
+	}
+	return false
 }
 
 // IsCustomOpenAIProtocol / IsCustomAnthropicProtocol / IsCustomGeminiProtocol
@@ -812,18 +927,16 @@ func (a *Account) GetBaseURL() string {
 		return ""
 	}
 	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
-	// Custom 账号：使用其自定义 base_url（必填，不回落官方）。
-	if a.IsCustom() {
-		return baseURL
-	}
 	if a.IsAntigravity() {
 		if baseURL == "" {
 			baseURL = "https://api.anthropic.com"
 		}
 		return strings.TrimRight(baseURL, "/") + "/antigravity"
 	}
-	// 原生 Anthropic apikey：锁定官方 URL，忽略任何历史 base_url 凭证。
-	return "https://api.anthropic.com"
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	return baseURL
 }
 
 // GetGeminiBaseURL 返回 Gemini 兼容端点的 base URL。
@@ -1185,12 +1298,11 @@ func (a *Account) GetOpenAIBaseURL() string {
 	if !a.IsOpenAI() {
 		return ""
 	}
-	// Custom（openai 协议）账号：使用其自定义 base_url。
-	if a.IsCustom() {
-		return strings.TrimSpace(a.GetCredential("base_url"))
+	baseURL := strings.TrimSpace(a.GetCredential("base_url"))
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
 	}
-	// 原生 OpenAI：锁定官方 URL，忽略任何历史 base_url 凭证。
-	return "https://api.openai.com"
+	return baseURL
 }
 
 func (a *Account) GetOpenAIAccessToken() string {
@@ -1397,22 +1509,13 @@ func (a *Account) IsOveragesEnabled() bool {
 	return false
 }
 
-// IsOpenAIPassthroughEnabled 返回 OpenAI 账号是否启用"自动透传（仅替换认证）"。
+// IsOpenAIPassthroughEnabled 返回 OpenAI 账号是否启用"完全透传（仅替换认证）"。
 //
-// 新字段：accounts.extra.openai_passthrough。
-// 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
+// 新字段：accounts.extra.relay_mode == "full_passthrough"。
+// 兼容字段：accounts.extra.openai_passthrough / openai_oauth_passthrough。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
-	if a == nil || !a.IsOpenAI() || a.Extra == nil {
-		return false
-	}
-	if enabled, ok := a.Extra["openai_passthrough"].(bool); ok {
-		return enabled
-	}
-	if enabled, ok := a.Extra["openai_oauth_passthrough"].(bool); ok {
-		return enabled
-	}
-	return false
+	return a != nil && a.IsOpenAI() && a.RelayMode() == RelayModeFullPassthrough
 }
 
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
@@ -1586,16 +1689,13 @@ func (a *Account) IsOpenAIOAuthPassthroughEnabled() bool {
 	return a != nil && a.IsOpenAIOAuth() && a.IsOpenAIPassthroughEnabled()
 }
 
-// IsAnthropicAPIKeyPassthroughEnabled 返回 Anthropic API Key 账号是否启用"自动透传（仅替换认证）"。
-// 字段：accounts.extra.anthropic_passthrough。
+// IsAnthropicAPIKeyPassthroughEnabled 返回 Anthropic API Key 账号是否启用"完全透传（仅替换认证）"。
+// 新字段：accounts.extra.relay_mode == "full_passthrough"。
+// 兼容字段：accounts.extra.anthropic_passthrough。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 // 注意：使用 IsAnthropic() 以覆盖 Custom（anthropic_messages 协议）账号。
 func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
-	if a == nil || !a.IsAnthropic() || a.Type != AccountTypeAPIKey || a.Extra == nil {
-		return false
-	}
-	enabled, ok := a.Extra["anthropic_passthrough"].(bool)
-	return ok && enabled
+	return a != nil && a.IsAnthropic() && a.Type == AccountTypeAPIKey && a.RelayMode() == RelayModeFullPassthrough
 }
 
 // WebSearch 模拟三态常量

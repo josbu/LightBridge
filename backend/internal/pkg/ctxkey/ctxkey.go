@@ -8,10 +8,24 @@ const (
 	// ForcePlatform 强制平台（用于 /antigravity 路由），由 middleware.ForcePlatform 设置
 	ForcePlatform Key = "ctx_force_platform"
 
-	// RequiredProtocol 当前请求的「所需上游协议」（见 service.CustomProtocol* 常量），
-	// 由 handler 依入站 endpoint 推导并注入。用于 Custom 账号的请求级调度过滤：
-	// 仅 protocol 与之一致的 Custom 账号可服务该请求。为空表示无协议约束。
+	// RequiredProtocol 兼容旧代码的请求协议字段。新路由语义下它等同于 InboundProtocol；
+	// 目标上游协议由 ProtocolRouter 根据账号能力单独决定。
 	RequiredProtocol Key = "ctx_required_protocol"
+
+	// InboundProtocol 当前请求的入站协议（见 service.CustomProtocol* 常量）。
+	InboundProtocol Key = "ctx_inbound_protocol"
+
+	// TargetProtocol 当前请求最终命中账号的出站协议（见 service.CustomProtocol* 常量）。
+	TargetProtocol Key = "ctx_target_protocol"
+
+	// RelayMode 当前请求最终采用的中转模式：router / passthrough / full_passthrough。
+	RelayMode Key = "ctx_relay_mode"
+
+	// ConversionChain 记录 Router 使用的协议转换链路，便于日志与审计。
+	ConversionChain Key = "ctx_conversion_chain"
+
+	// FinalRelayFormat 记录最终发送给上游的协议格式。
+	FinalRelayFormat Key = "ctx_final_relay_format"
 
 	// RequestID 为服务端生成/透传的请求 ID。
 	RequestID Key = "ctx_request_id"

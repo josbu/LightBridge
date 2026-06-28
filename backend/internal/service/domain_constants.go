@@ -53,6 +53,13 @@ const (
 	CustomProtocolGemini                = domain.CustomProtocolGemini
 )
 
+// Relay mode constants（accounts.extra["relay_mode"] 取值）。
+const (
+	RelayModeRouter          = domain.RelayModeRouter
+	RelayModePassthrough     = domain.RelayModePassthrough
+	RelayModeFullPassthrough = domain.RelayModeFullPassthrough
+)
+
 // Sub-platform constants（accounts.sub_platform 取值）。
 const (
 	// SubPlatformAntigravity 标识 gemini 平台下的 Antigravity 账号。

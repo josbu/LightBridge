@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"context"
 	"strings"
 
-	"github.com/WilliamWang1721/LightBridge/internal/pkg/ctxkey"
 	"github.com/WilliamWang1721/LightBridge/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -144,20 +142,17 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 		}
 		inbound := NormalizeInboundEndpoint(path)
 		c.Set(ctxKeyInboundEndpoint, inbound)
-		// 注入请求级「所需上游协议」，供 Service 层对 Custom 账号做调度过滤。
-		if proto := RequiredProtocolForInboundEndpoint(inbound); proto != "" && c.Request != nil {
-			c.Request = c.Request.WithContext(
-				context.WithValue(c.Request.Context(), ctxkey.RequiredProtocol, proto),
-			)
+		// 注入请求级入站协议；目标上游协议由 ProtocolRouter 按账号决定。
+		if proto := InboundProtocolForEndpoint(inbound); proto != "" && c.Request != nil {
+			c.Request = c.Request.WithContext(service.WithInboundProtocol(c.Request.Context(), proto))
 		}
 		c.Next()
 	}
 }
 
-// RequiredProtocolForInboundEndpoint 将规范化的入站 endpoint 映射为「所需上游协议」
-// （见 service.CustomProtocol* 常量）。Custom 账号仅当其 protocol 与之一致时可服务该请求。
+// InboundProtocolForEndpoint 将规范化的入站 endpoint 映射为入站协议。
 // 无对应协议的 endpoint（如 images）返回空串。
-func RequiredProtocolForInboundEndpoint(inbound string) string {
+func InboundProtocolForEndpoint(inbound string) string {
 	switch inbound {
 	case EndpointMessages:
 		return service.CustomProtocolAnthropicMessages
@@ -172,6 +167,12 @@ func RequiredProtocolForInboundEndpoint(inbound string) string {
 	default:
 		return ""
 	}
+}
+
+// RequiredProtocolForInboundEndpoint 兼容旧调用方。新语义下返回入站协议，
+// 不再表示账号必须使用的上游协议。
+func RequiredProtocolForInboundEndpoint(inbound string) string {
+	return InboundProtocolForEndpoint(inbound)
 }
 
 // ──────────────────────────────────────────────────────────
@@ -207,6 +208,23 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 	rawPath := ""
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		rawPath = c.Request.URL.Path
+	}
+	if c != nil && c.Request != nil {
+		switch service.TargetProtocolFromContext(c.Request.Context()) {
+		case service.CustomProtocolAnthropicMessages:
+			return EndpointMessages
+		case service.CustomProtocolOpenAIResponses:
+			if suffix := responsesSubpathSuffix(rawPath); suffix != "" {
+				return EndpointResponses + suffix
+			}
+			return EndpointResponses
+		case service.CustomProtocolOpenAIChatCompletions:
+			return EndpointChatCompletions
+		case service.CustomProtocolOpenAIEmbeddings:
+			return EndpointEmbeddings
+		case service.CustomProtocolGemini:
+			return EndpointGeminiModels
+		}
 	}
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
 }

@@ -329,33 +329,21 @@
         />
       </div>
 
-      <!-- Custom 自动透传开关（仅 OpenAI Responses / Anthropic Messages 协议） -->
+      <!-- Custom relay mode -->
       <div
-        v-if="form.platform === 'custom' && customPassthroughApplicable"
+        v-if="form.platform === 'custom'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-4">
           <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.custom.passthrough') }}</label>
+            <label class="input-label mb-0">{{ t('admin.accounts.relayMode.label') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.custom.passthroughDesc') }}
+              {{ t(relayModeHintKey(customRelayMode)) }}
             </p>
           </div>
-          <button
-            type="button"
-            @click="customPassthroughEnabled = !customPassthroughEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              customPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                customPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
+          <div class="w-56">
+            <Select v-model="customRelayMode" :options="relayModeOptions" />
+          </div>
         </div>
       </div>
 
@@ -2862,33 +2850,21 @@
         </div>
       </div>
 
-      <!-- OpenAI 自动透传开关（OAuth/API Key） -->
+      <!-- OpenAI relay mode -->
       <div
         v-if="form.platform === 'openai'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-4">
           <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.oauthPassthrough') }}</label>
+            <label class="input-label mb-0">{{ t('admin.accounts.relayMode.label') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+              {{ t(relayModeHintKey(openaiRelayMode)) }}
             </p>
           </div>
-          <button
-            type="button"
-            @click="openaiPassthroughEnabled = !openaiPassthroughEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openaiPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openaiPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
+          <div class="w-56">
+            <Select v-model="openaiRelayMode" :options="relayModeOptions" />
+          </div>
         </div>
       </div>
 
@@ -2913,33 +2889,39 @@
         </div>
       </div>
 
-      <!-- Anthropic API Key 自动透传开关 -->
+      <!-- Anthropic API Key relay mode -->
       <div
         v-if="form.platform === 'anthropic' && accountCategory === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-4">
           <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.anthropic.apiKeyPassthrough') }}</label>
+            <label class="input-label mb-0">{{ t('admin.accounts.relayMode.label') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropic.apiKeyPassthroughDesc') }}
+              {{ t(relayModeHintKey(anthropicRelayMode)) }}
             </p>
           </div>
-          <button
-            type="button"
-            @click="anthropicPassthroughEnabled = !anthropicPassthroughEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              anthropicPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                anthropicPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
+          <div class="w-56">
+            <Select v-model="anthropicRelayMode" :options="relayModeOptions" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Gemini relay mode -->
+      <div
+        v-if="form.platform === 'gemini' && accountCategory !== 'service_account'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.relayMode.label') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t(relayModeHintKey(geminiRelayMode)) }}
+            </p>
+          </div>
+          <div class="w-56">
+            <Select v-model="geminiRelayMode" :options="relayModeOptions" />
+          </div>
         </div>
       </div>
 
@@ -3639,6 +3621,13 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import {
+  RELAY_MODE_FULL_PASSTHROUGH,
+  RELAY_MODE_PASSTHROUGH,
+  RELAY_MODE_ROUTER,
+  writeRelayModeToExtra,
+  type RelayMode
+} from '@/utils/relayMode'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -3786,7 +3775,7 @@ const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
-const openaiPassthroughEnabled = ref(false)
+const openaiRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
@@ -3794,14 +3783,14 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
-const anthropicPassthroughEnabled = ref(false)
-const customPassthroughEnabled = ref(false)
-// Custom 账号：仅 OpenAI Responses / Anthropic Messages 协议支持自动透传。
-// 这两个协议有对应的“仅替换认证”透传转发实现；chat_completions / embeddings /
-// gemini 协议走各自的转换转发路径，不处理透传，故不提供开关。
-const customPassthroughApplicable = computed(() => {
-  if (form.platform !== 'custom') return false
-  return form.customProtocol === 'openai_responses' || form.customProtocol === 'anthropic_messages'
+const anthropicRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
+const geminiRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
+const customRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
+const openaiPassthroughEnabled = computed({
+  get: () => openaiRelayMode.value === RELAY_MODE_FULL_PASSTHROUGH,
+  set: (enabled: boolean) => {
+    openaiRelayMode.value = enabled ? RELAY_MODE_FULL_PASSTHROUGH : RELAY_MODE_ROUTER
+  }
 })
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
@@ -4041,6 +4030,18 @@ const openAIWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
   { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
 ])
+
+const relayModeOptions = computed(() => [
+  { value: RELAY_MODE_ROUTER, label: t('admin.accounts.relayMode.router') },
+  { value: RELAY_MODE_PASSTHROUGH, label: t('admin.accounts.relayMode.passthrough') },
+  { value: RELAY_MODE_FULL_PASSTHROUGH, label: t('admin.accounts.relayMode.fullPassthrough') }
+])
+
+const relayModeHintKey = (mode: RelayMode) => {
+  if (mode === RELAY_MODE_PASSTHROUGH) return 'admin.accounts.relayMode.passthroughDesc'
+  if (mode === RELAY_MODE_FULL_PASSTHROUGH) return 'admin.accounts.relayMode.fullPassthroughDesc'
+  return 'admin.accounts.relayMode.routerDesc'
+}
 
 const openaiResponsesWebSocketV2Mode = computed({
   get: () => {
@@ -4355,7 +4356,7 @@ watch(
       interceptWarmupRequests.value = false
     }
     if (newPlatform !== 'openai') {
-      openaiPassthroughEnabled.value = false
+      openaiRelayMode.value = RELAY_MODE_ROUTER
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -4363,11 +4364,14 @@ watch(
       codexCLIOnlyAllowClaudeCodeEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
-      anthropicPassthroughEnabled.value = false
+      anthropicRelayMode.value = RELAY_MODE_ROUTER
       webSearchEmulationMode.value = 'default'
     }
+    if (newPlatform !== 'gemini') {
+      geminiRelayMode.value = RELAY_MODE_ROUTER
+    }
     if (newPlatform !== 'custom') {
-      customPassthroughEnabled.value = false
+      customRelayMode.value = RELAY_MODE_ROUTER
     }
     // Reset OAuth states
     oauth.resetState()
@@ -4401,7 +4405,7 @@ watch(
       codexCLIOnlyAllowClaudeCodeEnabled.value = false
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
-      anthropicPassthroughEnabled.value = false
+      anthropicRelayMode.value = RELAY_MODE_ROUTER
       webSearchEmulationMode.value = 'default'
     }
   }
@@ -4808,7 +4812,7 @@ const resetForm = () => {
   customErrorCodeInput.value = null
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
-  openaiPassthroughEnabled.value = false
+  openaiRelayMode.value = RELAY_MODE_ROUTER
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -4816,8 +4820,9 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAllowClaudeCodeEnabled.value = false
-  anthropicPassthroughEnabled.value = false
-  customPassthroughEnabled.value = false
+  anthropicRelayMode.value = RELAY_MODE_ROUTER
+  geminiRelayMode.value = RELAY_MODE_ROUTER
+  customRelayMode.value = RELAY_MODE_ROUTER
   webSearchEmulationMode.value = 'default'
   // Reset quota control state
   windowCostEnabled.value = false
@@ -4891,12 +4896,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   // 清理兼容旧键，统一改用分类型开关。
   delete extra.responses_websockets_v2_enabled
   delete extra.openai_ws_enabled
-  if (openaiPassthroughEnabled.value) {
-    extra.openai_passthrough = true
-  } else {
-    delete extra.openai_passthrough
-    delete extra.openai_oauth_passthrough
-  }
+  writeRelayModeToExtra(extra, openaiRelayMode.value)
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
@@ -4937,17 +4937,23 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  if (anthropicPassthroughEnabled.value) {
-    extra.anthropic_passthrough = true
-  } else {
-    delete extra.anthropic_passthrough
-  }
+  writeRelayModeToExtra(extra, anthropicRelayMode.value)
   if (webSearchEmulationMode.value === 'default') {
     delete extra.web_search_emulation
   } else {
     extra.web_search_emulation = webSearchEmulationMode.value
   }
 
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const buildGeminiExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  if (form.platform !== 'gemini' || accountCategory.value === 'service_account') {
+    return base
+  }
+
+  const extra: Record<string, unknown> = { ...(base || {}) }
+  writeRelayModeToExtra(extra, geminiRelayMode.value)
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -5071,14 +5077,7 @@ const handleSubmit = async () => {
       protocol: form.customProtocol
     }
 
-    // 自动透传（仅替换认证）：按协议归属写入对应开关键
-    if (customPassthroughApplicable.value && customPassthroughEnabled.value) {
-      if (form.customProtocol === 'anthropic_messages') {
-        extra.anthropic_passthrough = true
-      } else {
-        extra.openai_passthrough = true
-      }
-    }
+    writeRelayModeToExtra(extra, customRelayMode.value)
 
     await createAccountAndFinish('custom', 'apikey', credentials, extra)
     return
@@ -5294,7 +5293,7 @@ const handleSubmit = async () => {
   }
 
   form.credentials = credentials
-  const extra = buildAnthropicExtra(buildOpenAIExtra())
+  const extra = buildGeminiExtra(buildAnthropicExtra(buildOpenAIExtra()))
 
   await doCreateAccount({
     ...form,
@@ -5843,7 +5842,7 @@ const handleGeminiExchange = async (authCode: string) => {
     if (!tokenInfo) return
 
     const credentials = geminiOAuth.buildCredentials(tokenInfo)
-    const extra = geminiOAuth.buildExtraInfo(tokenInfo)
+    const extra = buildGeminiExtra(geminiOAuth.buildExtraInfo(tokenInfo))
     await createAccountAndFinish('gemini', 'oauth', credentials, extra)
   } catch (error: any) {
     geminiOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
