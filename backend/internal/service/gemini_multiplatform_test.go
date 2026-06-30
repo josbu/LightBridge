@@ -57,8 +57,13 @@ func (m *mockAccountRepoForGemini) ListSchedulableByPlatform(ctx context.Context
 }
 
 func (m *mockAccountRepoForGemini) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
-	// 测试时不区分 groupID，直接按 platform 过滤
-	return m.ListSchedulableByPlatform(ctx, platform)
+	var result []Account
+	for _, acc := range m.accounts {
+		if acc.Platform == platform && acc.IsSchedulable() && mockGeminiAccountBelongsToGroup(acc, groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
 }
 
 // Stub methods to implement AccountRepository interface
@@ -114,7 +119,13 @@ func (m *mockAccountRepoForGemini) ListSchedulable(ctx context.Context) ([]Accou
 	return nil, nil
 }
 func (m *mockAccountRepoForGemini) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]Account, error) {
-	return nil, nil
+	var result []Account
+	for _, acc := range m.accounts {
+		if acc.IsSchedulable() && mockGeminiAccountBelongsToGroup(acc, groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
 }
 func (m *mockAccountRepoForGemini) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	if m.listByPlatformFunc != nil {
@@ -136,13 +147,40 @@ func (m *mockAccountRepoForGemini) ListSchedulableByGroupIDAndPlatforms(ctx cont
 	if m.listByGroupFunc != nil {
 		return m.listByGroupFunc(ctx, groupID, platforms)
 	}
-	return m.ListSchedulableByPlatforms(ctx, platforms)
+	var result []Account
+	platformSet := make(map[string]bool)
+	for _, p := range platforms {
+		platformSet[p] = true
+	}
+	for _, acc := range m.accounts {
+		if platformSet[acc.Platform] && acc.IsSchedulable() && mockGeminiAccountBelongsToGroup(acc, groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
 }
 func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	return m.ListSchedulableByPlatform(ctx, platform)
 }
 func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return m.ListSchedulableByPlatforms(ctx, platforms)
+}
+
+func mockGeminiAccountBelongsToGroup(acc Account, groupID int64) bool {
+	if len(acc.GroupIDs) == 0 && len(acc.AccountGroups) == 0 {
+		return true
+	}
+	for _, gid := range acc.GroupIDs {
+		if gid == groupID {
+			return true
+		}
+	}
+	for _, ag := range acc.AccountGroups {
+		if ag.GroupID == groupID {
+			return true
+		}
+	}
+	return false
 }
 func (m *mockAccountRepoForGemini) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
@@ -358,7 +396,7 @@ func TestGeminiMessagesCompatService_GroupResolution_ReusesContextGroup(t *testi
 	require.Equal(t, 0, groupRepo.getByIDLiteCalls)
 }
 
-func TestGeminiMessagesCompatService_GroupResolution_UsesLiteFetch(t *testing.T) {
+func TestGeminiMessagesCompatService_GroupResolution_DoesNotFetchGroupPlatform(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(7)
 
@@ -375,7 +413,7 @@ func TestGeminiMessagesCompatService_GroupResolution_UsesLiteFetch(t *testing.T)
 	cache := &mockGatewayCacheForGemini{}
 	groupRepo := &mockGroupRepoForGemini{
 		groups: map[int64]*Group{
-			groupID: {ID: groupID, Platform: PlatformGemini},
+			groupID: {ID: groupID, Platform: PlatformAnthropic},
 		},
 	}
 
@@ -389,17 +427,18 @@ func TestGeminiMessagesCompatService_GroupResolution_UsesLiteFetch(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	require.Equal(t, 0, groupRepo.getByIDCalls)
-	require.Equal(t, 1, groupRepo.getByIDLiteCalls)
+	require.Equal(t, 0, groupRepo.getByIDLiteCalls)
 }
 
-// TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_AntigravityGroup 测试 antigravity 分组
-func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_AntigravityGroup(t *testing.T) {
-	ctx := context.Background()
+// TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GroupDoesNotFilterPlatform
+// 测试 Gemini 入站在有分组时不再按分组 platform 隔离账号。
+func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GroupDoesNotFilterPlatform(t *testing.T) {
+	ctx := WithInboundProtocol(context.Background(), CustomProtocolGemini)
 
 	repo := &mockAccountRepoForGemini{
 		accounts: []Account{
-			{ID: 1, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},      // 应被隔离
-			{ID: 2, Platform: PlatformAntigravity, Priority: 1, Status: StatusActive, Schedulable: true}, // 应被选择
+			{ID: 1, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, SubPlatform: SubPlatformAntigravity, Priority: 2, Status: StatusActive, Schedulable: true},
 		},
 		accountsByID: map[int64]*Account{},
 	}
@@ -424,8 +463,8 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_Antigra
 	acc, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gemini-2.5-flash", nil)
 	require.NoError(t, err)
 	require.NotNil(t, acc)
-	require.Equal(t, int64(2), acc.ID)
-	require.Equal(t, PlatformAntigravity, acc.Platform, "antigravity 分组应只返回 antigravity 账户")
+	require.Equal(t, int64(1), acc.ID, "分组内账号不再按 group platform 隔离，应按优先级轮询")
+	require.Equal(t, PlatformGemini, acc.Platform)
 }
 
 // TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_OAuthPreferred 测试 OAuth 优先
@@ -611,7 +650,7 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyS
 	})
 }
 
-func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePlatformFallback(t *testing.T) {
+func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePlatformDoesNotFallbackOutsideGroup(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(9)
 	ctx = context.WithValue(ctx, ctxkey.ForcePlatform, PlatformAntigravity)
@@ -640,9 +679,9 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_ForcePl
 	}
 
 	acc, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gemini-2.5-flash", nil)
-	require.NoError(t, err)
-	require.NotNil(t, acc)
-	require.Equal(t, int64(1), acc.ID)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.Contains(t, err.Error(), "no available")
 }
 
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) {

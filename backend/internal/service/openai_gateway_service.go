@@ -1328,34 +1328,55 @@ func openAICompactSupportTier(account *Account) int {
 // isOpenAIAccountEligibleForRequest centralises the schedulable / OpenAI / model /
 // compact-support checks used during account selection.
 func isOpenAIAccountEligibleForRequest(ctx context.Context, account *Account, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {
-	if account == nil || !account.IsOpenAI() || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+	if account == nil || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+		return false
+	}
+	if !isOpenAISelectionProtocolCompatible(ctx, account) {
 		return false
 	}
 	// Custom 账号请求级协议匹配（sticky session 等绕过候选过滤的路径也需校验）。
 	if !accountMatchesRequestProtocol(ctx, account) {
 		return false
 	}
-	if paused, reason := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
-		// Debug level: this fires per-candidate on the scheduling hot path, so Info
-		// would amplify into log spam once several accounts cross the threshold.
-		slog.Debug("account_auto_paused_by_quota",
-			"account_id", account.ID,
-			"window", reason.window,
-			"threshold", reason.threshold,
-			"utilization", reason.utilization,
-		)
-		return false
+	if account.IsOpenAI() {
+		if paused, reason := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
+			// Debug level: this fires per-candidate on the scheduling hot path, so Info
+			// would amplify into log spam once several accounts cross the threshold.
+			slog.Debug("account_auto_paused_by_quota",
+				"account_id", account.ID,
+				"window", reason.window,
+				"threshold", reason.threshold,
+				"utilization", reason.utilization,
+			)
+			return false
+		}
 	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 		return false
 	}
-	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
-		return false
-	}
-	if requireCompact && openAICompactSupportTier(account) == 0 {
+	if account.IsOpenAI() {
+		if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+			return false
+		}
+		if requireCompact && openAICompactSupportTier(account) == 0 {
+			return false
+		}
+	} else if requireCompact {
 		return false
 	}
 	return true
+}
+
+func isOpenAISelectionProtocolCompatible(ctx context.Context, account *Account) bool {
+	if account == nil {
+		return false
+	}
+	inbound := InboundProtocolFromContext(ctx)
+	if IsMessageProtocol(inbound) {
+		_, ok := ProtocolRouteDecisionForAccount(ctx, account)
+		return ok
+	}
+	return account.IsOpenAI()
 }
 
 type openAIQuotaAutoPauseDecision struct {
@@ -2116,11 +2137,18 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		}
 		return filterAccountsByRequestProtocol(ctx, accounts), nil
 	}
-	// 有入站协议的网关请求可调度 OpenAI + Custom(OpenAI 协议)账号；
-	// 无入站协议的内部/旧调用保持单平台查询，避免把老路径升级成多平台 repo 依赖。
+	if groupID != nil && IsMessageProtocol(InboundProtocolFromContext(ctx)) {
+		accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
+		if err != nil {
+			return nil, fmt.Errorf("query accounts failed: %w", err)
+		}
+		return filterAccountsByRequestProtocol(ctx, accounts), nil
+	}
+	// 有消息协议入站的网关请求可调度所有消息协议账号；无入站协议的内部/旧调用
+	// 保持单平台查询，避免把 Embeddings/Images 等专用路径升级成多平台候选。
 	queryPlatforms := []string{PlatformOpenAI}
-	if InboundProtocolFromContext(ctx) != "" {
-		queryPlatforms = schedulingQueryPlatforms(PlatformOpenAI, false)
+	if IsMessageProtocol(InboundProtocolFromContext(ctx)) {
+		queryPlatforms = schedulingQueryPlatformsForRequest(ctx, PlatformOpenAI, false)
 	}
 	var accounts []Account
 	var err error

@@ -46,7 +46,6 @@ export interface ErrorAnalysisResult {
 
 export type ErrorAnalysisAccountReasonKey =
   | 'group_mismatch'
-  | 'platform_mismatch'
   | 'status_inactive'
   | 'status_error'
   | 'unschedulable'
@@ -436,10 +435,6 @@ export function diagnoseSchedulerAccount(
 
   if (groupID != null && !accountGroupIDs.includes(groupID)) {
     reasons.push({ key: 'group_mismatch', detail: String(groupID) })
-  }
-
-  if (detail?.platform && normalize(account.platform) !== normalize(detail.platform)) {
-    reasons.push({ key: 'platform_mismatch', detail: `${account.platform} != ${detail.platform}` })
   }
 
   if (account.status === 'inactive') reasons.push({ key: 'status_inactive' })

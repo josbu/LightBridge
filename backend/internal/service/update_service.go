@@ -432,6 +432,12 @@ func (s *UpdateService) selectUpdateAsset(info *UpdateInfo) (*Asset, string, boo
 	archiveName := s.getArchiveName()
 	for i := range info.ReleaseInfo.Assets {
 		asset := &info.ReleaseInfo.Assets[i]
+		if strings.Contains(asset.Name, archiveName) && strings.HasSuffix(asset.Name, ".tar.gz") {
+			return asset, checksumURL, false
+		}
+	}
+	for i := range info.ReleaseInfo.Assets {
+		asset := &info.ReleaseInfo.Assets[i]
 		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
 			return asset, checksumURL, false
 		}

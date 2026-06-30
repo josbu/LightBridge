@@ -12,6 +12,8 @@ const (
 	SchedulerModeSingle = "single"
 	SchedulerModeMixed  = "mixed"
 	SchedulerModeForced = "forced"
+
+	SchedulerPlatformGroupAny = "_group_any"
 )
 
 type SchedulerBucket struct {

@@ -500,7 +500,7 @@ func TestGetAvailableModels_UsesShortCacheAndSupportsInvalidation(t *testing.T) 
 	}
 
 	models1 := svc.GetAvailableModels(context.Background(), &groupID, PlatformAnthropic)
-	require.Equal(t, []string{"claude-3-5-haiku", "claude-3-5-sonnet"}, models1)
+	require.Equal(t, []string{"claude-3-5-haiku", "claude-3-5-sonnet", "gemini-2.5-pro"}, models1)
 	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
 
 	// TTL 内再次请求应命中缓存，不回源。
@@ -521,7 +521,7 @@ func TestGetAvailableModels_UsesShortCacheAndSupportsInvalidation(t *testing.T) 
 		},
 	}
 	models3 := svc.GetAvailableModels(context.Background(), &groupID, PlatformAnthropic)
-	require.Equal(t, []string{"claude-3-5-haiku", "claude-3-5-sonnet"}, models3)
+	require.Equal(t, []string{"claude-3-5-haiku", "claude-3-5-sonnet", "gemini-2.5-pro"}, models3)
 	require.Equal(t, int64(1), repo.listByGroupCalls.Load())
 
 	svc.InvalidateAvailableModelsCache(&groupID, PlatformAnthropic)

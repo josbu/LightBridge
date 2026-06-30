@@ -85,7 +85,7 @@ func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {
 	require.NotContains(t, modelIDsForTest(got.Data), "claude-sonnet-4-6")
 }
 
-func TestGatewayModels_GeminiGroupFiltersMappedModelsByPlatform(t *testing.T) {
+func TestGatewayModels_GroupModelsIncludeAllMappedAccountProtocols(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	groupID := int64(21)
@@ -129,7 +129,7 @@ func TestGatewayModels_GeminiGroupFiltersMappedModelsByPlatform(t *testing.T) {
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"gemini-2.5-flash"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"claude-sonnet-4-6", "gemini-2.5-flash"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListDisabledKeepsOriginalModels(t *testing.T) {

@@ -57,7 +57,6 @@ var zhMessages = map[string]string{
 	// Gemini / OpenAI specific
 	"Gemini compatibility service is not configured":                        "Gemini 兼容服务未配置",
 	"Failed to get user info":                                               "获取用户信息失败",
-	"API key group platform is not gemini":                                  "API Key 所属分组的平台不是 Gemini",
 	"Missing model in URL":                                                  "URL 中缺少 model",
 	"previous_response_id is only supported on Responses WebSocket v2":      "previous_response_id 仅在 Responses WebSocket v2 上受支持",
 	"previous_response_id must be a response.id (resp_*), not a message id": "previous_response_id 必须是 response.id（resp_*），而不是 message id",

@@ -41,6 +41,7 @@ type AdminService interface {
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
 	BatchUpdateUsers(ctx context.Context, userIDs []int64, input BatchUpdateUsersInput) (*BatchUpdateUsersResult, error)
 	GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error)
+	FindAPIKeyOwner(ctx context.Context, key string) (*APIKey, *User, error)
 	GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error)
 	GetUserRPMStatus(ctx context.Context, userID int64) (*UserRPMStatus, error)
 	// GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
@@ -210,15 +211,15 @@ type CreateGroupInput struct {
 	ImagePrice4K         *float64
 	ClaudeCodeOnly       bool   // 仅允许 Claude Code 客户端
 	FallbackGroupID      *int64 // 降级分组 ID
-	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
+	// 无效请求兜底分组 ID
 	FallbackGroupIDOnInvalidRequest *int64
-	// 模型路由配置（仅 anthropic 平台使用）
+	// 模型路由配置
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled bool // 是否启用模型路由
 	MCPXMLInject        *bool
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes []string
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
+	// OpenAI Messages 调度配置
 	AllowMessagesDispatch       bool
 	DefaultMappedModel          string
 	RequireOAuthOnly            bool
@@ -251,15 +252,15 @@ type UpdateGroupInput struct {
 	ImagePrice4K         *float64
 	ClaudeCodeOnly       *bool  // 仅允许 Claude Code 客户端
 	FallbackGroupID      *int64 // 降级分组 ID
-	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
+	// 无效请求兜底分组 ID
 	FallbackGroupIDOnInvalidRequest *int64
-	// 模型路由配置（仅 anthropic 平台使用）
+	// 模型路由配置
 	ModelRouting        map[string][]int64
 	ModelRoutingEnabled *bool // 是否启用模型路由
 	MCPXMLInject        *bool
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes *[]string
-	// OpenAI Messages 调度配置（仅 openai 平台使用）
+	// OpenAI Messages 调度配置
 	AllowMessagesDispatch       *bool
 	DefaultMappedModel          *string
 	RequireOAuthOnly            *bool
@@ -880,9 +881,9 @@ type BatchUpdateUsersInput struct {
 
 // BatchUpdateUsersResult 批量更新结果。
 type BatchUpdateUsersResult struct {
-	Total     int `json:"total"`
-	Success   int `json:"success"`
-	Failed    int `json:"failed"`
+	Total     int     `json:"total"`
+	Success   int     `json:"success"`
+	Failed    int     `json:"failed"`
 	FailedIDs []int64 `json:"failed_ids"`
 }
 
@@ -1003,6 +1004,19 @@ func (s *adminServiceImpl) GetUserAPIKeys(ctx context.Context, userID int64, pag
 		return nil, 0, err
 	}
 	return keys, result.Total, nil
+}
+
+func (s *adminServiceImpl) FindAPIKeyOwner(ctx context.Context, key string) (*APIKey, *User, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, nil, infraerrors.BadRequest("API_KEY_REQUIRED", "api key is required")
+	}
+
+	apiKey, err := s.apiKeyRepo.GetByKey(ctx, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	return apiKey, apiKey.User, nil
 }
 
 func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (*UserRPMStatus, error) {
@@ -1685,9 +1699,6 @@ func (s *adminServiceImpl) GetGroupModelsListCandidates(ctx context.Context, id 
 		seen[model] = struct{}{}
 	}
 	for _, acc := range accounts {
-		if acc.Platform != platform {
-			continue
-		}
 		for model := range acc.GetModelMapping() {
 			model = strings.TrimSpace(model)
 			if model == "" {
@@ -1773,7 +1784,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	// 校验无效请求兜底分组
 	if fallbackOnInvalidRequest != nil {
-		if err := s.validateFallbackGroupOnInvalidRequest(ctx, 0, platform, subscriptionType, *fallbackOnInvalidRequest); err != nil {
+		if err := s.validateFallbackGroupOnInvalidRequest(ctx, 0, subscriptionType, *fallbackOnInvalidRequest); err != nil {
 			return nil, err
 		}
 	}
@@ -1797,14 +1808,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			}
 		}
 
-		// 校验源分组的平台是否与新分组一致
+		// 校验源分组存在。分组 platform 不再限制账号复制，账号是否可用于请求由协议能力决定。
 		for _, srcGroupID := range uniqueSourceGroupIDs {
-			srcGroup, err := s.groupRepo.GetByIDLite(ctx, srcGroupID)
-			if err != nil {
+			if _, err := s.groupRepo.GetByIDLite(ctx, srcGroupID); err != nil {
 				return nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
-			}
-			if srcGroup.Platform != platform {
-				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, platform, srcGroup.Platform)
 			}
 		}
 
@@ -1853,7 +1860,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	// require_oauth_only: 过滤掉 apikey 类型账号
-	if group.RequireOAuthOnly && (group.Platform == PlatformOpenAI || group.Platform == PlatformAntigravity || group.Platform == PlatformAnthropic || group.Platform == PlatformGemini) && len(accountIDsToCopy) > 0 {
+	if group.RequireOAuthOnly && len(accountIDsToCopy) > 0 {
 		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
@@ -1940,12 +1947,9 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 
 // validateFallbackGroupOnInvalidRequest 校验无效请求兜底分组的有效性
 // currentGroupID: 当前分组 ID（新建时为 0）
-// platform/subscriptionType: 当前分组的有效平台/订阅类型
+// subscriptionType: 当前分组的订阅类型
 // fallbackGroupID: 兜底分组 ID
-func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Context, currentGroupID int64, platform, subscriptionType string, fallbackGroupID int64) error {
-	if platform != PlatformAnthropic && platform != PlatformAntigravity {
-		return fmt.Errorf("invalid request fallback only supported for anthropic or antigravity groups")
-	}
+func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Context, currentGroupID int64, subscriptionType string, fallbackGroupID int64) error {
 	if subscriptionType == SubscriptionTypeSubscription {
 		return fmt.Errorf("subscription groups cannot set invalid request fallback")
 	}
@@ -1956,9 +1960,6 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	fallbackGroup, err := s.groupRepo.GetByIDLite(ctx, fallbackGroupID)
 	if err != nil {
 		return fmt.Errorf("fallback group not found: %w", err)
-	}
-	if fallbackGroup.Platform != PlatformAnthropic {
-		return fmt.Errorf("fallback group must be anthropic platform")
 	}
 	if fallbackGroup.SubscriptionType == SubscriptionTypeSubscription {
 		return fmt.Errorf("fallback group cannot be subscription type")
@@ -2054,7 +2055,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 	if fallbackOnInvalidRequest != nil {
-		if err := s.validateFallbackGroupOnInvalidRequest(ctx, id, group.Platform, group.SubscriptionType, *fallbackOnInvalidRequest); err != nil {
+		if err := s.validateFallbackGroupOnInvalidRequest(ctx, id, group.SubscriptionType, *fallbackOnInvalidRequest); err != nil {
 			return nil, err
 		}
 	}
@@ -2125,14 +2126,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			}
 		}
 
-		// 校验源分组的平台是否与当前分组一致
+		// 校验源分组存在。分组 platform 不再限制账号复制，账号是否可用于请求由协议能力决定。
 		for _, srcGroupID := range uniqueSourceGroupIDs {
-			srcGroup, err := s.groupRepo.GetByIDLite(ctx, srcGroupID)
-			if err != nil {
+			if _, err := s.groupRepo.GetByIDLite(ctx, srcGroupID); err != nil {
 				return nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
-			}
-			if srcGroup.Platform != group.Platform {
-				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, group.Platform, srcGroup.Platform)
 			}
 		}
 
@@ -2148,7 +2145,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 
 		// require_oauth_only: 过滤掉 apikey 类型账号
-		if group.RequireOAuthOnly && (group.Platform == PlatformOpenAI || group.Platform == PlatformAntigravity || group.Platform == PlatformAnthropic || group.Platform == PlatformGemini) && len(accountIDsToCopy) > 0 {
+		if group.RequireOAuthOnly && len(accountIDsToCopy) > 0 {
 			accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)

@@ -114,18 +114,11 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 		return account, nil
 	}
 
-	// 3. 查询可调度账户（强制平台模式：优先按分组查找，找不到再查全部）
-	// Query schedulable accounts (force platform mode: try group first, fallback to all)
+	// 3. 查询可调度账户。有分组时只在该分组内轮询，不再按分组 platform 或强制平台回退全局账号。
+	// Query schedulable accounts. Grouped requests stay within the selected group.
 	accounts, err := s.listSchedulableAccountsOnce(ctx, groupID, platform, hasForcePlatform)
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
-	}
-	// 强制平台模式下，分组中找不到账户时回退查询全部
-	if len(accounts) == 0 && groupID != nil && hasForcePlatform {
-		accounts, err = s.listSchedulableAccountsOnce(ctx, nil, platform, hasForcePlatform)
-		if err != nil {
-			return nil, fmt.Errorf("query accounts failed: %w", err)
-		}
 	}
 
 	// 4. 按优先级 + LRU 选择最佳账号
@@ -160,22 +153,7 @@ func (s *GeminiMessagesCompatService) resolvePlatformAndSchedulingMode(ctx conte
 		return forcePlatform, false, true, nil
 	}
 
-	if groupID != nil {
-		// 根据分组 platform 决定查询哪种账号
-		var group *Group
-		if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == *groupID {
-			group = ctxGroup
-		} else {
-			group, err = s.groupRepo.GetByIDLite(ctx, *groupID)
-			if err != nil {
-				return "", false, false, fmt.Errorf("get group failed: %w", err)
-			}
-		}
-		// gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
-		return group.Platform, group.Platform == PlatformGemini, false, nil
-	}
-
-	// 无分组时只使用原生 gemini 平台
+	// Gemini native/compat 入站按请求协议调度，不再读取或依赖分组 platform。
 	return PlatformGemini, true, false, nil
 }
 
@@ -230,10 +208,10 @@ func (s *GeminiMessagesCompatService) tryStickySessionHit(
 }
 
 // isAccountUsableForRequest 检查账号是否可用于当前请求。
-// 验证：模型调度、模型支持、平台匹配、速率限制预检。
+// 验证：模型调度、模型支持、协议能力、速率限制预检。
 //
 // isAccountUsableForRequest checks if account is usable for current request.
-// Validates: model scheduling, model support, platform matching, rate limit precheck.
+// Validates: model scheduling, model support, protocol capability, rate limit precheck.
 func (s *GeminiMessagesCompatService) isAccountUsableForRequest(
 	ctx context.Context,
 	account *Account,
@@ -262,9 +240,8 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 		return false
 	}
 
-	// 检查平台匹配
-	// Check platform matching
-	if !s.isAccountValidForPlatform(account, platform, useMixedScheduling) {
+	// 非 Router 消息路径仍保留原生平台约束；消息协议入站由 ProtocolRouter 判定。
+	if !IsMessageProtocol(InboundProtocolFromContext(ctx)) && !s.isAccountValidForPlatform(account, platform, useMixedScheduling) {
 		return false
 	}
 
@@ -443,6 +420,13 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 	if s.schedulerSnapshot != nil {
 		accounts, _, err = s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 	} else {
+		if groupID != nil && IsMessageProtocol(InboundProtocolFromContext(ctx)) {
+			accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
+			if err != nil {
+				return nil, err
+			}
+			return filterAccountsByRequestProtocol(ctx, accounts), nil
+		}
 		useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
 		// Antigravity 账号现位于 gemini 平台之下，Custom 账号位于 custom 平台之下：
 		// schedulingQueryPlatforms 会把它们一并纳入候选，再由协议/平台过滤收敛。

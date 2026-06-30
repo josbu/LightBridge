@@ -984,8 +984,8 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
-        <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
+        <!-- Claude Code 客户端限制 -->
+        <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.claudeCode.title") }}
@@ -1060,11 +1060,8 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
-        <div
-          v-if="createForm.platform === 'openai'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
+        <!-- OpenAI Messages 调度配置 -->
+        <div class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
@@ -1287,13 +1284,8 @@
           </div>
         </div>
 
-        <!-- 账号过滤控制 (OpenAI/Antigravity/Anthropic/Gemini) -->
+        <!-- 账号过滤控制 -->
         <div
-          v-if="
-            ['openai', 'antigravity', 'anthropic', 'gemini'].includes(
-              createForm.platform,
-            )
-          "
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -1375,12 +1367,9 @@
           </div>
         </div>
 
-        <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
+        <!-- 无效请求兜底（非订阅分组） -->
         <div
-          v-if="
-            ['anthropic', 'antigravity'].includes(createForm.platform) &&
-            createForm.subscription_type !== 'subscription'
-          "
+          v-if="createForm.subscription_type !== 'subscription'"
           class="border-t pt-4"
         >
           <label class="input-label">{{
@@ -1396,8 +1385,8 @@
           </p>
         </div>
 
-        <!-- 模型路由配置（仅 anthropic 平台） -->
-        <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
+        <!-- 模型路由配置 -->
+        <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.modelRouting.title") }}
@@ -2272,8 +2261,8 @@
           </div>
         </div>
 
-        <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
-        <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
+        <!-- Claude Code 客户端限制 -->
+        <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.claudeCode.title") }}
@@ -2344,11 +2333,8 @@
           </div>
         </div>
 
-        <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
-        <div
-          v-if="editForm.platform === 'openai'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
+        <!-- OpenAI Messages 调度配置 -->
+        <div class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
@@ -2571,13 +2557,8 @@
           </div>
         </div>
 
-        <!-- 账号过滤控制 (OpenAI/Antigravity/Anthropic/Gemini) -->
+        <!-- 账号过滤控制 -->
         <div
-          v-if="
-            ['openai', 'antigravity', 'anthropic', 'gemini'].includes(
-              editForm.platform,
-            )
-          "
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -2659,12 +2640,9 @@
           </div>
         </div>
 
-        <!-- 无效请求兜底（仅 anthropic/antigravity 平台，且非订阅分组） -->
+        <!-- 无效请求兜底（非订阅分组） -->
         <div
-          v-if="
-            ['anthropic', 'antigravity'].includes(editForm.platform) &&
-            editForm.subscription_type !== 'subscription'
-          "
+          v-if="editForm.subscription_type !== 'subscription'"
           class="border-t pt-4"
         >
           <label class="input-label">{{
@@ -2680,8 +2658,8 @@
           </p>
         </div>
 
-        <!-- 模型路由配置（仅 anthropic 平台） -->
-        <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
+        <!-- 模型路由配置 -->
+        <div class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.modelRouting.title") }}
@@ -3158,16 +3136,13 @@ const subscriptionTypeOptions = computed(() => [
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
 ]);
 
-// 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
+// 降级分组选项（创建时）- 未启用 claude_code_only 的活跃分组
 const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const eligibleGroups = groups.value.filter(
-    (g) =>
-      g.platform === "anthropic" &&
-      !g.claude_code_only &&
-      g.status === "active",
+    (g) => !g.claude_code_only && g.status === "active",
   );
   eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name });
@@ -3183,7 +3158,6 @@ const fallbackGroupOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
   const eligibleGroups = groups.value.filter(
     (g) =>
-      g.platform === "anthropic" &&
       !g.claude_code_only &&
       g.status === "active" &&
       g.id !== currentId,
@@ -3194,14 +3168,13 @@ const fallbackGroupOptionsForEdit = computed(() => {
   return options;
 });
 
-// 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
+// 无效请求兜底分组选项（创建时）- 非订阅且未配置兜底的活跃分组
 const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const eligibleGroups = groups.value.filter(
     (g) =>
-      g.platform === "anthropic" &&
       g.status === "active" &&
       g.subscription_type !== "subscription" &&
       g.fallback_group_id_on_invalid_request === null,
@@ -3220,7 +3193,6 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
   const eligibleGroups = groups.value.filter(
     (g) =>
-      g.platform === "anthropic" &&
       g.status === "active" &&
       g.subscription_type !== "subscription" &&
       g.fallback_group_id_on_invalid_request === null &&
@@ -3232,10 +3204,10 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
   return options;
 });
 
-// 复制账号的源分组选项（创建时）- 仅包含相同平台且有账号的分组
+// 复制账号的源分组选项（创建时）- 有账号的任意分组
 const copyAccountsGroupOptions = computed(() => {
   const eligibleGroups = groups.value.filter(
-    (g) => g.platform === createForm.platform && (g.account_count || 0) > 0,
+    (g) => (g.account_count || 0) > 0,
   );
   return eligibleGroups.map((g) => ({
     value: g.id,
@@ -3243,14 +3215,11 @@ const copyAccountsGroupOptions = computed(() => {
   }));
 });
 
-// 复制账号的源分组选项（编辑时）- 仅包含相同平台且有账号的分组，排除自身
+// 复制账号的源分组选项（编辑时）- 有账号的任意分组，排除自身
 const copyAccountsGroupOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
   const eligibleGroups = groups.value.filter(
-    (g) =>
-      g.platform === editForm.platform &&
-      (g.account_count || 0) > 0 &&
-      g.id !== currentId,
+    (g) => (g.account_count || 0) > 0 && g.id !== currentId,
   );
   return eligibleGroups.map((g) => ({
     value: g.id,
@@ -3340,17 +3309,17 @@ const createForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // Claude Code 客户端限制（仅 anthropic 平台使用）
+  // Claude Code 客户端限制
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
+  // OpenAI Messages 调度配置
   allow_messages_dispatch: false,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
-  // 账号过滤控制（OpenAI/Antigravity 平台）
+  // 账号过滤控制
   require_oauth_only: false,
   require_privacy_set: false,
   // 模型路由开关
@@ -3434,16 +3403,15 @@ const clearAllAccountSearchState = () => {
 
 const accountSearchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
   delay: 300,
-  search: async (keyword, { signal }) => {
-    const res = await adminAPI.accounts.list(
-      1,
-      20,
-      {
-        search: keyword,
-        platform: "anthropic",
-      },
-      { signal },
-    );
+	search: async (keyword, { signal }) => {
+	    const res = await adminAPI.accounts.list(
+	      1,
+	      20,
+	      {
+	        search: keyword,
+	      },
+	      { signal },
+	    );
     return res.items.map((account) => ({ id: account.id, name: account.name }));
   },
   onSuccess: (key, result) => {
@@ -3454,7 +3422,7 @@ const accountSearchRunner = useKeyedDebouncedSearch<SimpleAccount[]>({
   },
 });
 
-// 搜索账号（仅限 anthropic 平台）
+// 搜索账号
 const searchAccounts = (key: string) => {
   accountSearchRunner.trigger(key, accountSearchKeyword.value[key] || "");
 };
@@ -3671,18 +3639,18 @@ const editForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // Claude Code 客户端限制（仅 anthropic 平台使用）
+  // Claude Code 客户端限制
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
-  // OpenAI Messages 调度配置（仅 openai 平台使用）
+  // OpenAI Messages 调度配置
   allow_messages_dispatch: false,
   default_mapped_model: '',
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
-  // 账号过滤控制（OpenAI/Antigravity 平台）
+  // 账号过滤控制
   require_oauth_only: false,
   require_privacy_set: false,
   // 模型路由开关
@@ -3992,16 +3960,13 @@ const handleCreateGroup = async () => {
         createForm.platform,
         createForm.supported_model_scopes,
       ),
-      messages_dispatch_model_config:
-        createForm.platform === "openai"
-          ? messagesDispatchFormStateToConfig({
-              allow_messages_dispatch: createForm.allow_messages_dispatch,
-              opus_mapped_model: createForm.opus_mapped_model,
-              sonnet_mapped_model: createForm.sonnet_mapped_model,
-              haiku_mapped_model: createForm.haiku_mapped_model,
-              exact_model_mappings: createForm.exact_model_mappings,
-            })
-          : undefined,
+      messages_dispatch_model_config: messagesDispatchFormStateToConfig({
+        allow_messages_dispatch: createForm.allow_messages_dispatch,
+        opus_mapped_model: createForm.opus_mapped_model,
+        sonnet_mapped_model: createForm.sonnet_mapped_model,
+        haiku_mapped_model: createForm.haiku_mapped_model,
+        exact_model_mappings: createForm.exact_model_mappings,
+      }),
     };
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
@@ -4131,16 +4096,13 @@ const handleUpdateGroup = async () => {
         editForm.platform,
         editForm.supported_model_scopes,
       ),
-      messages_dispatch_model_config:
-        editForm.platform === "openai"
-          ? messagesDispatchFormStateToConfig({
-              allow_messages_dispatch: editForm.allow_messages_dispatch,
-              opus_mapped_model: editForm.opus_mapped_model,
-              sonnet_mapped_model: editForm.sonnet_mapped_model,
-              haiku_mapped_model: editForm.haiku_mapped_model,
-              exact_model_mappings: editForm.exact_model_mappings,
-            })
-          : undefined,
+      messages_dispatch_model_config: messagesDispatchFormStateToConfig({
+        allow_messages_dispatch: editForm.allow_messages_dispatch,
+        opus_mapped_model: editForm.opus_mapped_model,
+        sonnet_mapped_model: editForm.sonnet_mapped_model,
+        haiku_mapped_model: editForm.haiku_mapped_model,
+        exact_model_mappings: editForm.exact_model_mappings,
+      }),
     };
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
@@ -4234,16 +4196,6 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
-    if (!["anthropic", "antigravity"].includes(newVal)) {
-      createForm.fallback_group_id_on_invalid_request = null;
-    }
-    if (newVal !== "openai") {
-      resetMessagesDispatchFormState(createForm);
-    }
-    if (!["openai", "antigravity", "anthropic", "gemini"].includes(newVal)) {
-      createForm.require_oauth_only = false;
-      createForm.require_privacy_set = false;
-    }
     resetModelsListState(createModelsListState);
     loadModelsListCandidates("create", 0, newVal);
   },
@@ -4252,35 +4204,12 @@ watch(
 watch(
   () => editForm.platform,
   (newVal) => {
-    if (!["anthropic", "antigravity"].includes(newVal)) {
-      editForm.fallback_group_id_on_invalid_request = null;
-    }
-    if (newVal !== "openai") {
-      resetMessagesDispatchFormState(editForm);
-    }
-    if (!["openai", "antigravity", "anthropic", "gemini"].includes(newVal)) {
-      editForm.require_oauth_only = false;
-      editForm.require_privacy_set = false;
-    }
     if (editingGroup.value) {
       resetModelsListState(editModelsListState, editForm.platform === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined);
       loadModelsListCandidates("edit", editingGroup.value.id, newVal);
     }
   },
 );
-
-watch(
-  () => editForm.platform,
-  (newVal) => {
-    if (!['anthropic', 'antigravity'].includes(newVal)) {
-      editForm.fallback_group_id_on_invalid_request = null
-    }
-    if (newVal !== 'openai') {
-      editForm.allow_messages_dispatch = false
-      editForm.default_mapped_model = ''
-    }
-  }
-)
 
 // 点击外部关闭账号搜索下拉框
 const handleClickOutside = (event: MouseEvent) => {

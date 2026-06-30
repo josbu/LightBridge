@@ -153,4 +153,12 @@ describe('buildErrorAnalysis', () => {
       'model_not_allowed'
     ]))
   })
+
+  it('does not treat group account platform differences as scheduler blockers', () => {
+    const detail = makeDetail({ group_id: 7, platform: 'openai' })
+    const diagnostic = diagnoseSchedulerAccount(makeAccount({ platform: 'module' as any }), detail)
+
+    expect(diagnostic.available).toBe(true)
+    expect(diagnostic.reasons.map((reason) => reason.key)).not.toContain('platform_mismatch')
+  })
 })

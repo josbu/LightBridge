@@ -27,7 +27,7 @@ func TestCollectSelectionFailureStats(t *testing.T) {
 			Status:      StatusActive,
 			Schedulable: false,
 		},
-		// platform filtered
+		// platform no longer filters grouped scheduler candidates
 		{
 			ID:          3,
 			Platform:    PlatformAntigravity,
@@ -81,11 +81,8 @@ func TestCollectSelectionFailureStats(t *testing.T) {
 	if stats.Unschedulable != 1 {
 		t.Fatalf("unschedulable=%d want=1", stats.Unschedulable)
 	}
-	if stats.PlatformFiltered != 1 {
-		t.Fatalf("platform_filtered=%d want=1", stats.PlatformFiltered)
-	}
-	if stats.ModelUnsupported != 1 {
-		t.Fatalf("model_unsupported=%d want=1", stats.ModelUnsupported)
+	if stats.ModelUnsupported != 2 {
+		t.Fatalf("model_unsupported=%d want=2", stats.ModelUnsupported)
 	}
 	if stats.ModelRateLimited != 1 {
 		t.Fatalf("model_rate_limited=%d want=1", stats.ModelRateLimited)

@@ -141,6 +141,17 @@ func (m *groupAwareMockAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx cont
 	return result, nil
 }
 
+// ListSchedulableByGroupID 返回属于指定分组的全部账号，不按平台过滤。
+func (m *groupAwareMockAccountRepo) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]Account, error) {
+	var result []Account
+	for _, acc := range m.allAccounts {
+		if acc.IsSchedulable() && accountBelongsToGroup(acc, groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
 // ListSchedulableByGroupIDAndPlatforms 返回属于指定分组的账号（多平台版本）
 func (m *groupAwareMockAccountRepo) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]Account, error) {
 	platformSet := make(map[string]bool, len(platforms))

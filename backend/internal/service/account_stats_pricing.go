@@ -35,7 +35,7 @@ func resolveAccountStatsCost(
 		return nil
 	}
 
-	platform := channelService.GetGroupPlatform(ctx, groupID)
+	platform := channelPlatformForContext(ctx, channelService.GetGroupPlatform(ctx, groupID))
 
 	// 优先级 1：自定义规则（始终尝试）
 	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount); cost != nil {

@@ -83,14 +83,14 @@ func TestShouldUseOpenAIHandler_CustomGroupOpenAIEndpoints(t *testing.T) {
 	}
 }
 
-func TestShouldUseGeminiHandler_CustomGroupGeminiEndpoint(t *testing.T) {
+func TestShouldUseGeminiHandler_IgnoresGroupPlatform(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	groupID := int64(1)
 	c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
 		GroupID: &groupID,
-		Group:   &service.Group{Platform: service.PlatformCustom},
+		Group:   &service.Group{Platform: service.PlatformOpenAI},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini:generateContent", nil)
 	c.Request = req

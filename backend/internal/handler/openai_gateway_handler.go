@@ -591,8 +591,8 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 	log.Warn("codex.remote_compact.failed")
 }
 
-// Messages handles Anthropic Messages API requests routed to OpenAI platform.
-// POST /v1/messages (when group platform is OpenAI)
+// Messages handles Anthropic Messages API requests routed to OpenAI-capable accounts.
+// POST /v1/messages
 func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverAnthropicMessagesPanic(c, &streamStarted)

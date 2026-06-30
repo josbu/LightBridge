@@ -126,35 +126,12 @@ func RegisterGatewayRoutes(
 
 }
 
-// getGroupPlatform extracts the group platform from the API Key stored in context.
-func getGroupPlatform(c *gin.Context) string {
-	apiKey, ok := middleware.GetAPIKeyFromContext(c)
-	if !ok || apiKey.Group == nil {
-		return ""
-	}
-	return apiKey.Group.Platform
-}
-
 func shouldUseOpenAIHandler(c *gin.Context) bool {
-	switch getGroupPlatform(c) {
-	case service.PlatformOpenAI:
-		return true
-	case service.PlatformCustom:
-		return isOpenAIInboundEndpoint(handler.GetInboundEndpoint(c))
-	default:
-		return false
-	}
+	return isOpenAIInboundEndpoint(handler.GetInboundEndpoint(c))
 }
 
 func shouldUseGeminiHandler(c *gin.Context) bool {
-	switch getGroupPlatform(c) {
-	case service.PlatformGemini:
-		return true
-	case service.PlatformCustom:
-		return handler.RequiredProtocolForInboundEndpoint(handler.GetInboundEndpoint(c)) == service.CustomProtocolGemini
-	default:
-		return false
-	}
+	return handler.RequiredProtocolForInboundEndpoint(handler.GetInboundEndpoint(c)) == service.CustomProtocolGemini
 }
 
 func isOpenAIInboundEndpoint(inbound string) bool {

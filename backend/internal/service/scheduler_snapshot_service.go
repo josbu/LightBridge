@@ -523,25 +523,26 @@ func (s *SchedulerSnapshotService) rebuildBucketsForPlatform(ctx context.Context
 	}
 	var firstErr error
 	for _, gid := range groupIDs {
+		singleBucket := s.bucketFor(&gid, platform, SchedulerModeSingle)
 		// Within a single poll batch, skip (groupID, platform) pairs that were
 		// already rebuilt. The first rebuild loads fresh DB data for all accounts
 		// in the group, so subsequent rebuilds for the same group+platform within
 		// the same batch are redundant.
 		if seen != nil {
-			key := batchSeenKey{gid, platform}
+			key := batchSeenKey{singleBucket.GroupID, singleBucket.Platform}
 			if _, exists := seen[key]; exists {
 				continue
 			}
 			seen[key] = struct{}{}
 		}
-		if err := s.rebuildBucket(ctx, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeSingle}, reason); err != nil && firstErr == nil {
+		if err := s.rebuildBucket(ctx, singleBucket, reason); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		if err := s.rebuildBucket(ctx, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeForced}, reason); err != nil && firstErr == nil {
+		if err := s.rebuildBucket(ctx, s.bucketFor(&gid, platform, SchedulerModeForced), reason); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		if platform == PlatformAnthropic || platform == PlatformGemini {
-			if err := s.rebuildBucket(ctx, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeMixed}, reason); err != nil && firstErr == nil {
+		if singleBucket.Platform == SchedulerPlatformGroupAny || platform == PlatformAnthropic || platform == PlatformGemini {
+			if err := s.rebuildBucket(ctx, s.bucketFor(&gid, platform, SchedulerModeMixed), reason); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
@@ -668,6 +669,10 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		groupID = 0
 	}
 
+	if groupID > 0 {
+		return s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
+	}
+
 	// 解析需查询的 DB platform 列表：Antigravity 账号现位于 gemini 平台之下，
 	// 故 antigravity / anthropic 混合等 bucket 需把别名翻译为实际 platform 查询。
 	queryPlatforms := schedulingQueryPlatforms(bucket.Platform, useMixed)
@@ -713,8 +718,12 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 }
 
 func (s *SchedulerSnapshotService) bucketFor(groupID *int64, platform string, mode string) SchedulerBucket {
+	normalizedGroupID := s.normalizeGroupID(groupID)
+	if normalizedGroupID > 0 {
+		platform = SchedulerPlatformGroupAny
+	}
 	return SchedulerBucket{
-		GroupID:  s.normalizeGroupID(groupID),
+		GroupID:  normalizedGroupID,
 		Platform: platform,
 		Mode:     mode,
 	}
@@ -838,14 +847,9 @@ func (s *SchedulerSnapshotService) defaultBuckets(ctx context.Context) ([]Schedu
 		return dedupeBuckets(buckets), nil
 	}
 	for _, group := range groups {
-		if group.Platform == "" {
-			continue
-		}
-		buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: group.Platform, Mode: SchedulerModeSingle})
-		buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: group.Platform, Mode: SchedulerModeForced})
-		if group.Platform == PlatformAnthropic || group.Platform == PlatformGemini {
-			buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: group.Platform, Mode: SchedulerModeMixed})
-		}
+		buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: SchedulerPlatformGroupAny, Mode: SchedulerModeSingle})
+		buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: SchedulerPlatformGroupAny, Mode: SchedulerModeForced})
+		buckets = append(buckets, SchedulerBucket{GroupID: group.ID, Platform: SchedulerPlatformGroupAny, Mode: SchedulerModeMixed})
 	}
 	return dedupeBuckets(buckets), nil
 }

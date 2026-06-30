@@ -482,15 +482,6 @@ func TestClassifyOpsLocalBusinessLimitErrorsExcludedFromSLA(t *testing.T) {
 			wantPhase:   "request",
 		},
 		{
-			name:        "gemini group platform mismatch",
-			errType:     "api_error",
-			message:     "API key group platform is not gemini",
-			code:        "400",
-			status:      http.StatusBadRequest,
-			wantErrType: "api_error",
-			wantPhase:   "request",
-		},
-		{
 			name:        "gateway API key 5h rate limit",
 			errType:     "api_error",
 			message:     "api key 5小时限额已用完",
@@ -774,12 +765,6 @@ func TestClassifyOpsUpstreamAuthTextStillCountsForSLA(t *testing.T) {
 			message: "API key is disabled",
 			code:    "API_KEY_DISABLED",
 			status:  http.StatusUnauthorized,
-		},
-		{
-			name:    "gemini group platform mismatch",
-			message: "API key group platform is not gemini",
-			code:    "400",
-			status:  http.StatusBadRequest,
 		},
 		{
 			name:    "provider balance error",

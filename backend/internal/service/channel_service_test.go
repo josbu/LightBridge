@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/WilliamWang1721/LightBridge/internal/pkg/ctxkey"
 	"github.com/WilliamWang1721/LightBridge/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -1922,33 +1923,27 @@ func TestReplaceModelInBody_InvalidJSON(t *testing.T) {
 }
 
 // ===========================================================================
-// 7. isPlatformPricingMatch
+// 7. channelPlatformForContext
 // ===========================================================================
 
-func TestIsPlatformPricingMatch(t *testing.T) {
+func TestChannelPlatformForContext(t *testing.T) {
 	tests := []struct {
-		name            string
-		groupPlatform   string
-		pricingPlatform string
-		want            bool
+		name     string
+		ctx      context.Context
+		fallback string
+		want     string
 	}{
-		{"antigravity does NOT match anthropic", PlatformAntigravity, PlatformAnthropic, false},
-		{"antigravity does NOT match gemini", PlatformAntigravity, PlatformGemini, false},
-		{"antigravity matches antigravity", PlatformAntigravity, PlatformAntigravity, true},
-		{"antigravity does NOT match openai", PlatformAntigravity, PlatformOpenAI, false},
-		{"anthropic matches anthropic", PlatformAnthropic, PlatformAnthropic, true},
-		{"anthropic does NOT match antigravity", PlatformAnthropic, PlatformAntigravity, false},
-		{"anthropic does NOT match gemini", PlatformAnthropic, PlatformGemini, false},
-		{"gemini matches gemini", PlatformGemini, PlatformGemini, true},
-		{"gemini does NOT match antigravity", PlatformGemini, PlatformAntigravity, false},
-		{"gemini does NOT match anthropic", PlatformGemini, PlatformAnthropic, false},
-		{"empty string matches nothing", "", PlatformAnthropic, false},
-		{"empty string matches empty", "", "", true},
+		{"fallback without request protocol", context.Background(), PlatformAnthropic, PlatformAnthropic},
+		{"gemini inbound overrides fallback", WithInboundProtocol(context.Background(), CustomProtocolGemini), PlatformAnthropic, PlatformGemini},
+		{"openai responses inbound overrides fallback", WithInboundProtocol(context.Background(), CustomProtocolOpenAIResponses), PlatformAnthropic, PlatformOpenAI},
+		{"openai chat inbound overrides fallback", WithInboundProtocol(context.Background(), CustomProtocolOpenAIChatCompletions), PlatformGemini, PlatformOpenAI},
+		{"anthropic inbound overrides fallback", WithInboundProtocol(context.Background(), CustomProtocolAnthropicMessages), PlatformGemini, PlatformAnthropic},
+		{"force platform wins over inbound protocol", context.WithValue(WithInboundProtocol(context.Background(), CustomProtocolGemini), ctxkey.ForcePlatform, PlatformAntigravity), PlatformAnthropic, PlatformAntigravity},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, isPlatformPricingMatch(tt.groupPlatform, tt.pricingPlatform))
+			require.Equal(t, tt.want, channelPlatformForContext(tt.ctx, tt.fallback))
 		})
 	}
 }
