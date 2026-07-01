@@ -37,6 +37,7 @@ type OpsErrorLog struct {
 	Platform   string `json:"platform"`
 	Model      string `json:"model"`
 
+	IsRead             bool       `json:"is_read" db:"is_read"`
 	Resolved           bool       `json:"resolved"`
 	ResolvedAt         *time.Time `json:"resolved_at"`
 	ResolvedByUserID   *int64     `json:"resolved_by_user_id"`
@@ -103,6 +104,7 @@ type OpsErrorLogFilter struct {
 	Phase            string
 	Owner            string
 	Source           string
+	IsRead           *bool
 	Resolved         *bool
 	Query            string
 	UserQuery        string // Search by user email

@@ -213,6 +213,7 @@ SELECT
   COALESCE(e.resolved, false),
   e.resolved_at,
   e.resolved_by_user_id,
+  COALESCE(e.is_read, false),
   COALESCE(u2.email, ''),
   COALESCE(e.client_request_id, ''),
   COALESCE(e.request_id, ''),
@@ -261,6 +262,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var userEmail string
 		var resolvedAt sql.NullTime
 		var resolvedBy sql.NullInt64
+		var isRead sql.NullBool
 		var resolvedByName string
 		var requestType sql.NullInt64
 		if err := rows.Scan(
@@ -277,6 +279,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&item.Resolved,
 			&resolvedAt,
 			&resolvedBy,
+			&isRead,
 			&resolvedByName,
 			&item.ClientRequestID,
 			&item.RequestID,
@@ -308,6 +311,9 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			item.ResolvedByUserID = &v
 		}
 		item.ResolvedByUserName = resolvedByName
+		if isRead.Valid {
+			item.IsRead = isRead.Bool
+		}
 		item.StatusCode = int(statusCode.Int64)
 		if clientIP.Valid {
 			s := clientIP.String
@@ -878,6 +884,10 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	if resolvedFilter != nil {
 		args = append(args, *resolvedFilter)
 		clauses = append(clauses, "COALESCE(e.resolved,false) = $"+itoa(len(args)))
+	}
+	if filter.IsRead != nil {
+		args = append(args, *filter.IsRead)
+		clauses = append(clauses, "COALESCE(e.is_read,false) = $"+itoa(len(args)))
 	}
 
 	// View filter: errors vs excluded vs all.

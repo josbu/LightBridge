@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 )
 
 // RuntimeStatus describes the aistudio-api runtime readiness on this host.
@@ -98,8 +97,8 @@ func (i *Installer) Detect(ctx context.Context) (*RuntimeStatus, error) {
 
 // InstallResult is returned by Install to summarize what was done.
 type InstallResult struct {
-	Steps   []string `json:"steps"`
-	Status  *RuntimeStatus `json:"status"`
+	Steps  []string       `json:"steps"`
+	Status *RuntimeStatus `json:"status"`
 }
 
 // Install performs best-effort installation: pip install requirements into the
@@ -232,6 +231,3 @@ func missingLinuxLibs() []string {
 
 // ErrInstallerNotReady is returned when callers attempt to use the runtime before install.
 var ErrInstallerNotReady = errors.New("aistudio-api runtime is not installed; run the installer first")
-
-// ensureTimeout is the default context timeout for detect probes.
-const ensureTimeout = 10 * time.Second
