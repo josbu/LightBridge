@@ -158,6 +158,16 @@ func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
 			return
 		}
 	}
+	if v := strings.TrimSpace(c.Query("is_read")); v != "" {
+		switch v {
+		case "true", "1":
+			t := true
+			filter.IsRead = &t
+		case "false", "0":
+			f := false
+			filter.IsRead = &f
+		}
+	}
 	if statusCodesStr := strings.TrimSpace(c.Query("status_codes")); statusCodesStr != "" {
 		parts := strings.Split(statusCodesStr, ",")
 		out := make([]int, 0, len(parts))
@@ -265,6 +275,16 @@ func (h *OpsHandler) ListRequestErrors(c *gin.Context) {
 		default:
 			response.BadRequest(c, "Invalid resolved")
 			return
+		}
+	}
+	if v := strings.TrimSpace(c.Query("is_read")); v != "" {
+		switch v {
+		case "true", "1":
+			t := true
+			filter.IsRead = &t
+		case "false", "0":
+			f := false
+			filter.IsRead = &f
 		}
 	}
 	if statusCodesStr := strings.TrimSpace(c.Query("status_codes")); statusCodesStr != "" {
@@ -471,6 +491,16 @@ func (h *OpsHandler) ListUpstreamErrors(c *gin.Context) {
 		default:
 			response.BadRequest(c, "Invalid resolved")
 			return
+		}
+	}
+	if v := strings.TrimSpace(c.Query("is_read")); v != "" {
+		switch v {
+		case "true", "1":
+			t := true
+			filter.IsRead = &t
+		case "false", "0":
+			f := false
+			filter.IsRead = &f
 		}
 	}
 	if statusCodesStr := strings.TrimSpace(c.Query("status_codes")); statusCodesStr != "" {
