@@ -75,6 +75,15 @@
           <Icon name="refresh" size="sm" :class="loadingList ? 'animate-spin' : ''" />
           <span>{{ t('common.refresh') }}</span>
         </button>
+        <button
+          type="button"
+          class="btn btn-danger"
+          :disabled="loadingList || total === 0"
+          @click="confirmDeleteAll"
+        >
+          <Icon name="xCircle" size="sm" />
+          <span>{{ t('admin.ops.errorAnalysis.clearErrors') }}</span>
+        </button>
       </div>
 
       <div class="grid min-h-[720px] grid-cols-1 gap-5 xl:grid-cols-[440px_minmax(0,1fr)]">
@@ -492,7 +501,7 @@ import Select from '@/components/common/Select.vue'
 
 import { useAppStore } from '@/stores'
 import { adminAPI } from '@/api/admin'
-import { opsAPI, markRequestErrorsRead, type OpsErrorDetail, type OpsErrorLog, type OpsErrorListQueryParams } from '@/api/admin/ops'
+import { opsAPI, markRequestErrorsRead, deleteRequestErrorsBatch, type OpsErrorDetail, type OpsErrorLog, type OpsErrorListQueryParams } from '@/api/admin/ops'
 import type { Account } from '@/types'
 import { formatDateTime } from './utils/opsFormatters'
 import {
@@ -811,6 +820,32 @@ async function handleExportAll() {
     appStore.showError(t('admin.ops.errorAnalysis.exportFailed'))
   } finally {
     exportingAll.value = false
+  }
+}
+
+async function confirmDeleteAll() {
+  const confirmed = window.confirm(
+    t('admin.ops.errorAnalysis.clearErrorsConfirm', { count: total.value })
+  )
+  if (!confirmed) return
+
+  try {
+    const params: OpsErrorListQueryParams = {
+      start_time: new Date(startTime.value).toISOString(),
+      end_time: new Date(endTime.value).toISOString(),
+      view: 'all'
+    }
+    if (statusCodeFilter.value) params.status_codes = statusCodeFilter.value
+    if (searchQuery.value.trim()) params.q = searchQuery.value.trim()
+    const userFilterParams = resolveUserFilterParams(userFilter.value)
+    Object.assign(params, userFilterParams)
+    if (readStatusFilter.value) params.is_read = readStatusFilter.value
+
+    const result = await deleteRequestErrorsBatch(params)
+    appStore.showSuccess(t('admin.ops.errorAnalysis.clearErrorsSuccess', { count: result.deleted }))
+    fetchRequestErrors({ keepSelection: false })
+  } catch {
+    appStore.showError(t('admin.ops.errorAnalysis.clearErrorsFailed'))
   }
 }
 
