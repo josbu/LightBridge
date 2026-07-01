@@ -61,11 +61,27 @@ func (h *GatewayHandler) routeContext(ctx context.Context, account *service.Acco
 	if !ok {
 		accountID := int64(0)
 		relayMode := service.RelayModeRouter
+		accountName := ""
+		accountPlatform := ""
 		if account != nil {
 			accountID = account.ID
+			accountName = account.Name
+			accountPlatform = account.Platform
 			relayMode = account.RelayMode()
 		}
-		return ctx, decision, fmt.Errorf("%w: inbound=%s account_id=%d relay_mode=%s", errProtocolRouteUnsupported, decision.InboundProtocol, accountID, relayMode)
+		failureReason := decision.FailureReason
+		if failureReason == "" {
+			failureReason = "unknown routing failure"
+		}
+		return ctx, decision, fmt.Errorf("%w: inbound=%s account_id=%d account_name=%s account_platform=%s relay_mode=%s reason=%s",
+			errProtocolRouteUnsupported,
+			decision.InboundProtocol,
+			accountID,
+			accountName,
+			accountPlatform,
+			relayMode,
+			failureReason,
+		)
 	}
 	routeCtx := service.WithProtocolRouteDecision(ctx, decision)
 	routeLogger := logger.FromContext(routeCtx).With(appendProtocolRouteLogFields(nil, routeCtx)...)
@@ -103,7 +119,8 @@ func (h *GatewayHandler) forwardMessagesViaProtocolRouter(
 
 	case service.CustomProtocolOpenAIResponses, service.CustomProtocolOpenAIChatCompletions:
 		if h.openAIGatewayService == nil {
-			return protocolForwardResult{}, fmt.Errorf("%w: openai service unavailable", errProtocolRouteUnsupported)
+			return protocolForwardResult{}, fmt.Errorf("%w: openai gateway service is not initialized (inbound=%s target=%s account_id=%d account_name=%s)",
+				errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol, account.ID, account.Name)
 		}
 		result, err := h.openAIGatewayService.ForwardAsAnthropic(routeCtx, c, account, body, promptCacheKey, defaultMappedModel)
 		return protocolForwardResult{OpenAI: result}, err
@@ -117,7 +134,8 @@ func (h *GatewayHandler) forwardMessagesViaProtocolRouter(
 		return protocolForwardResult{Gateway: result}, err
 	}
 
-	return protocolForwardResult{}, fmt.Errorf("%w: inbound=%s target=%s", errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol)
+	return protocolForwardResult{}, fmt.Errorf("%w: no forwarding handler for target protocol %q (inbound=%s account_id=%d account_name=%s)",
+		errProtocolRouteUnsupported, decision.TargetProtocol, decision.InboundProtocol, account.ID, account.Name)
 }
 
 func (h *GatewayHandler) forwardResponsesViaProtocolRouter(
@@ -140,7 +158,8 @@ func (h *GatewayHandler) forwardResponsesViaProtocolRouter(
 	switch decision.TargetProtocol {
 	case service.CustomProtocolOpenAIResponses, service.CustomProtocolOpenAIChatCompletions:
 		if h.openAIGatewayService == nil {
-			return protocolForwardResult{}, fmt.Errorf("%w: openai service unavailable", errProtocolRouteUnsupported)
+			return protocolForwardResult{}, fmt.Errorf("%w: openai gateway service is not initialized (inbound=%s target=%s account_id=%d account_name=%s)",
+				errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol, account.ID, account.Name)
 		}
 		result, err := h.openAIGatewayService.Forward(routeCtx, c, account, body)
 		return protocolForwardResult{OpenAI: result}, err
@@ -151,7 +170,8 @@ func (h *GatewayHandler) forwardResponsesViaProtocolRouter(
 		result, err := h.geminiCompatService.ForwardAsResponses(routeCtx, c, account, body)
 		return protocolForwardResult{Gateway: result}, err
 	default:
-		return protocolForwardResult{}, fmt.Errorf("%w: inbound=%s target=%s", errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol)
+		return protocolForwardResult{}, fmt.Errorf("%w: no forwarding handler for target protocol %q (inbound=%s account_id=%d account_name=%s)",
+			errProtocolRouteUnsupported, decision.TargetProtocol, decision.InboundProtocol, account.ID, account.Name)
 	}
 }
 
@@ -177,7 +197,8 @@ func (h *GatewayHandler) forwardChatCompletionsViaProtocolRouter(
 	switch decision.TargetProtocol {
 	case service.CustomProtocolOpenAIResponses, service.CustomProtocolOpenAIChatCompletions:
 		if h.openAIGatewayService == nil {
-			return protocolForwardResult{}, fmt.Errorf("%w: openai service unavailable", errProtocolRouteUnsupported)
+			return protocolForwardResult{}, fmt.Errorf("%w: openai gateway service is not initialized (inbound=%s target=%s account_id=%d account_name=%s)",
+				errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol, account.ID, account.Name)
 		}
 		result, err := h.openAIGatewayService.ForwardAsChatCompletions(routeCtx, c, account, body, promptCacheKey, defaultMappedModel)
 		return protocolForwardResult{OpenAI: result}, err
@@ -188,7 +209,8 @@ func (h *GatewayHandler) forwardChatCompletionsViaProtocolRouter(
 		result, err := h.geminiCompatService.ForwardAsChatCompletions(routeCtx, c, account, body)
 		return protocolForwardResult{Gateway: result}, err
 	default:
-		return protocolForwardResult{}, fmt.Errorf("%w: inbound=%s target=%s", errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol)
+		return protocolForwardResult{}, fmt.Errorf("%w: no forwarding handler for target protocol %q (inbound=%s account_id=%d account_name=%s)",
+			errProtocolRouteUnsupported, decision.TargetProtocol, decision.InboundProtocol, account.ID, account.Name)
 	}
 }
 
@@ -249,7 +271,8 @@ func (h *GatewayHandler) forwardGeminiNativeViaProtocolRouter(
 
 	case service.CustomProtocolOpenAIResponses, service.CustomProtocolOpenAIChatCompletions:
 		if h.openAIGatewayService == nil {
-			return protocolForwardResult{}, fmt.Errorf("%w: openai service unavailable", errProtocolRouteUnsupported)
+			return protocolForwardResult{}, fmt.Errorf("%w: openai gateway service is not initialized (inbound=%s target=%s account_id=%d account_name=%s)",
+				errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol, account.ID, account.Name)
 		}
 		claudeBody, err := service.GeminiGenerateContentToAnthropicMessages(body, modelName, stream)
 		if err != nil {
@@ -267,7 +290,8 @@ func (h *GatewayHandler) forwardGeminiNativeViaProtocolRouter(
 		return protocolForwardResult{OpenAI: result}, nil
 	}
 
-	return protocolForwardResult{}, fmt.Errorf("%w: inbound=%s target=%s", errProtocolRouteUnsupported, decision.InboundProtocol, decision.TargetProtocol)
+	return protocolForwardResult{}, fmt.Errorf("%w: no forwarding handler for target protocol %q (inbound=%s account_id=%d account_name=%s)",
+		errProtocolRouteUnsupported, decision.TargetProtocol, decision.InboundProtocol, account.ID, account.Name)
 }
 
 func (h *GatewayHandler) forwardFullPassthrough(
@@ -279,7 +303,8 @@ func (h *GatewayHandler) forwardFullPassthrough(
 	requestStream bool,
 ) (*service.ForwardResult, error) {
 	if h.gatewayService == nil {
-		return nil, fmt.Errorf("%w: gateway service unavailable", errProtocolRouteUnsupported)
+		return nil, fmt.Errorf("%w: gateway service is not initialized for full passthrough (account_id=%d account_name=%s)",
+			errProtocolRouteUnsupported, account.ID, account.Name)
 	}
 	token := ""
 	tokenType := ""

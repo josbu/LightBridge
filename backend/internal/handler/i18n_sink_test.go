@@ -43,7 +43,7 @@ func TestErrorResponseLocalization(t *testing.T) {
 
 	t.Run("upstream 5xx mapping is translated for zh", func(t *testing.T) {
 		c, rec := newErrorTestContext("zh")
-		// mapUpstreamError(503) yields the English "Upstream service temporarily unavailable".
+		// mapUpstreamError(503) yields the English "Upstream service temporarily unavailable (upstream_status=503)".
 		_, errType, msg := h.mapUpstreamError(503)
 		h.errorResponse(c, http.StatusBadGateway, errType, msg)
 		if !strings.Contains(rec.Body.String(), "上游服务暂时不可用") {

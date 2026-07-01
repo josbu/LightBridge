@@ -618,9 +618,14 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
-	// 使用默认的错误映射
-	status, message := mapGeminiUpstreamError(statusCode)
-	googleError(c, status, message)
+	// 先本地化基础消息，再追加上游技术细节
+	status, baseMsg := mapGeminiUpstreamError(statusCode)
+	localized := localizeMessage(c, baseMsg)
+	detail := buildUpstreamDetail(statusCode, upstreamMsg)
+	if detail != "" {
+		localized = localized + " " + detail
+	}
+	googleError(c, status, localized)
 }
 
 func mapGeminiUpstreamError(statusCode int) (int, string) {

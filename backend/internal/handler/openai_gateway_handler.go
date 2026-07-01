@@ -1779,16 +1779,26 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
-	// 使用默认的错误映射
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
-	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+	// 先本地化基础消息，再追加上游技术细节
+	status, errType, baseMsg := h.mapUpstreamError(statusCode)
+	localized := localizeMessage(c, baseMsg)
+	detail := buildUpstreamDetail(statusCode, upstreamMsg)
+	if detail != "" {
+		localized = localized + " " + detail
+	}
+	h.handleStreamingAwareErrorLocalized(c, status, errType, localized, streamStarted)
 }
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
 func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
-	status, errType, errMsg := h.mapUpstreamError(statusCode)
-	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
-	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+	status, errType, baseMsg := h.mapUpstreamError(statusCode)
+	service.SetOpsUpstreamError(c, statusCode, baseMsg, "")
+	localized := localizeMessage(c, baseMsg)
+	detail := buildUpstreamDetail(statusCode, "")
+	if detail != "" {
+		localized = localized + " " + detail
+	}
+	h.handleStreamingAwareErrorLocalized(c, status, errType, localized, streamStarted)
 }
 
 func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
@@ -1806,6 +1816,29 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 	default:
 		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
 	}
+}
+
+// handleStreamingAwareErrorLocalized 与 handleStreamingAwareError 相同，但 message 已经本地化。
+func (h *OpenAIGatewayHandler) handleStreamingAwareErrorLocalized(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	message = localizeMessage(c, message)
+	if streamStarted {
+		if inboundIsResponses(c) {
+			if writeResponsesFailedSSE(c, errType, message) {
+				return
+			}
+		}
+		flusher, ok := c.Writer.(http.Flusher)
+		if ok {
+			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
+				_ = c.Error(err)
+			}
+			flusher.Flush()
+		}
+		return
+	}
+
+	h.errorResponse(c, status, errType, message)
 }
 
 // handleStreamingAwareError handles errors that may occur after streaming has started

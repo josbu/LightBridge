@@ -346,5 +346,17 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		h.responsesErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.responsesErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+
+	// 先本地化基础消息，再追加上游技术细节
+	baseMsg := "All available accounts exhausted"
+	localized := localizeMessage(c, baseMsg)
+	if lastErr != nil {
+		upstreamMsg := service.ExtractUpstreamErrorMessage(lastErr.ResponseBody)
+		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+		detail := buildUpstreamDetail(statusCode, upstreamMsg)
+		if detail != "" {
+			localized = localized + " " + detail
+		}
+	}
+	h.responsesErrorResponse(c, statusCode, "server_error", localized)
 }

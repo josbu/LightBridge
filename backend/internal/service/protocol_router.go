@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/WilliamWang1721/LightBridge/internal/pkg/ctxkey"
@@ -13,6 +14,7 @@ type ProtocolRouteDecision struct {
 	RelayMode        string
 	ConversionChain  []string
 	FinalRelayFormat string
+	FailureReason    string
 }
 
 func InboundProtocolFromContext(ctx context.Context) string {
@@ -107,12 +109,20 @@ func ProtocolRouteDecisionForAccount(ctx context.Context, account *Account) (Pro
 func ProtocolRouteDecisionForAccountProtocols(inbound string, account *Account) (ProtocolRouteDecision, bool) {
 	inbound = strings.TrimSpace(inbound)
 	if account == nil {
-		return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: RelayModeRouter}, false
+		return ProtocolRouteDecision{
+			InboundProtocol: inbound,
+			RelayMode:       RelayModeRouter,
+			FailureReason:   "account is nil",
+		}, false
 	}
 	mode := account.RelayMode()
 	supported := account.SupportedTargetProtocols()
 	if len(supported) == 0 {
-		return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: mode}, false
+		return ProtocolRouteDecision{
+			InboundProtocol: inbound,
+			RelayMode:       mode,
+			FailureReason:   "account has no supported target protocols",
+		}, false
 	}
 
 	if inbound == "" {
@@ -139,7 +149,11 @@ func ProtocolRouteDecisionForAccountProtocols(inbound string, account *Account) 
 
 	case RelayModePassthrough:
 		if !containsProtocol(supported, inbound) {
-			return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: mode}, false
+			return ProtocolRouteDecision{
+				InboundProtocol: inbound,
+				RelayMode:       mode,
+				FailureReason:   fmt.Sprintf("passthrough mode does not support inbound protocol %q (supported: %s)", inbound, strings.Join(supported, ", ")),
+			}, false
 		}
 		return ProtocolRouteDecision{
 			InboundProtocol:  inbound,
@@ -161,14 +175,27 @@ func ProtocolRouteDecisionForAccountProtocols(inbound string, account *Account) 
 	}
 
 	if !IsMessageProtocol(inbound) {
-		return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: RelayModeRouter}, false
+		return ProtocolRouteDecision{
+			InboundProtocol: inbound,
+			RelayMode:       RelayModeRouter,
+			FailureReason:   fmt.Sprintf("inbound protocol %q is not a recognized message protocol (supported: anthropic-messages, openai-responses, openai-chat-completions, gemini)", inbound),
+		}, false
 	}
 	target := preferredTargetProtocol(account, supported, inbound)
 	if !IsMessageProtocol(target) {
-		return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: RelayModeRouter}, false
+		return ProtocolRouteDecision{
+			InboundProtocol: inbound,
+			RelayMode:       RelayModeRouter,
+			FailureReason:   fmt.Sprintf("account has no supported target protocol for conversion (account supports: %s)", strings.Join(supported, ", ")),
+		}, false
 	}
 	if !routePairImplemented(inbound, target) {
-		return ProtocolRouteDecision{InboundProtocol: inbound, RelayMode: RelayModeRouter}, false
+		return ProtocolRouteDecision{
+			InboundProtocol: inbound,
+			TargetProtocol:   target,
+			RelayMode:       RelayModeRouter,
+			FailureReason:   fmt.Sprintf("conversion from %q to %q is not implemented", inbound, target),
+		}, false
 	}
 	chain := buildConversionChain(inbound, target)
 	return ProtocolRouteDecision{
