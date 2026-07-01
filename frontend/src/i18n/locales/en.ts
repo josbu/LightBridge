@@ -5364,7 +5364,19 @@ export default {
           checkRecentDeployment: 'Compare recent deployments, migrations, and config changes.',
           inspectRawError: 'Expand the raw response and compare nearby requests in the same time window.',
           compareNearbyRequests: 'Compare successful and failed requests with the same model, group, and account.'
-        }
+        },
+        startTime: 'Start Time',
+        endTime: 'End Time',
+        resetTimeRange: 'Reset Time',
+        readStatus: 'Read Status',
+        readStatusAll: 'All',
+        readStatusUnread: 'Unread',
+        readStatusRead: 'Read',
+        clearErrors: 'Clear Errors',
+        clearErrorsConfirm: 'Are you sure you want to delete {count} error records matching the current filters? This action cannot be undone.',
+        clearErrorsSuccess: 'Deleted {count} error records',
+        clearErrorsFailed: 'Delete failed',
+        clearErrorsCancelled: 'Cancelled'
       },
       requestDetails: {
         title: 'Request Details',

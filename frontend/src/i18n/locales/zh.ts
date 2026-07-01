@@ -5523,7 +5523,19 @@ export default {
           checkRecentDeployment: '对比最近部署、迁移和配置变更。',
           inspectRawError: '展开原始响应并与同时间窗口相邻请求对比。',
           compareNearbyRequests: '比较同模型、同分组、同账号的成功与失败请求。'
-        }
+        },
+        startTime: '开始时间',
+        endTime: '结束时间',
+        resetTimeRange: '重置时间',
+        readStatus: '已读状态',
+        readStatusAll: '全部',
+        readStatusUnread: '未读',
+        readStatusRead: '已读',
+        clearErrors: '清空错误',
+        clearErrorsConfirm: '确定要删除当前筛选条件下的 {count} 条错误记录吗？此操作不可恢复。',
+        clearErrorsSuccess: '已删除 {count} 条错误记录',
+        clearErrorsFailed: '删除失败',
+        clearErrorsCancelled: '已取消'
       },
       requestDetails: {
         title: '请求明细',
