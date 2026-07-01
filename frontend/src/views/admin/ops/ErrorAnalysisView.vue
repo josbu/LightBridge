@@ -59,6 +59,9 @@
         <div class="w-32">
           <Select :model-value="statusCodeFilter" :options="statusOptions" @update:model-value="statusCodeFilter = String($event || '')" />
         </div>
+        <div class="w-28">
+          <Select :model-value="readStatusFilter" :options="readStatusOptions" @update:model-value="readStatusFilter = String($event || '')" />
+        </div>
         <button
           type="button"
           class="btn btn-secondary"
@@ -115,7 +118,8 @@
                       <span :class="['inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-black ring-1 ring-inset', statusClass(item.status_code)]">
                         {{ item.status_code }}
                       </span>
-                      <span class="truncate text-xs font-bold text-gray-900 dark:text-white">
+                      <span v-if="!item.is_read" class="h-2 w-2 shrink-0 rounded-full bg-blue-500"></span>
+                      <span :class="['truncate text-xs', item.is_read ? 'font-normal' : 'font-bold']">
                         {{ item.phase || '-' }} / {{ item.error_owner || '-' }}
                       </span>
                     </div>
@@ -484,10 +488,11 @@ import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Select from '@/components/common/Select.vue'
 
 import { useAppStore } from '@/stores'
 import { adminAPI } from '@/api/admin'
-import { opsAPI, type OpsErrorDetail, type OpsErrorLog, type OpsErrorListQueryParams } from '@/api/admin/ops'
+import { opsAPI, markRequestErrorsRead, type OpsErrorDetail, type OpsErrorLog, type OpsErrorListQueryParams } from '@/api/admin/ops'
 import type { Account } from '@/types'
 import { formatDateTime } from './utils/opsFormatters'
 import {
@@ -525,6 +530,7 @@ function getDefaultStartTime(): string {
 const startTime = ref(getDefaultStartTime())
 const endTime = ref(formatDatetimeLocal(new Date()))
 const statusCodeFilter = ref('')
+const readStatusFilter = ref('')
 const searchQuery = ref('')
 const userFilter = ref('')
 
@@ -553,6 +559,12 @@ const statusOptions = computed(() => [
   { value: '502', label: '502' },
   { value: '503', label: '503' },
   { value: '504', label: '504' }
+])
+
+const readStatusOptions = computed(() => [
+  { value: '', label: t('admin.ops.errorAnalysis.readStatusAll') },
+  { value: 'false', label: t('admin.ops.errorAnalysis.readStatusUnread') },
+  { value: 'true', label: t('admin.ops.errorAnalysis.readStatusRead') },
 ])
 
 const analysis = computed(() => buildErrorAnalysis(selectedDetail.value, correlatedUpstreamErrors.value))
@@ -584,6 +596,7 @@ async function fetchRequestErrors(options: { keepSelection?: boolean } = {}) {
       view: 'all'
     }
     if (statusCodeFilter.value) params.status_codes = statusCodeFilter.value
+    if (readStatusFilter.value) params.is_read = readStatusFilter.value
     if (searchQuery.value.trim()) params.q = searchQuery.value.trim()
     const userFilterParams = resolveUserFilterParams(userFilter.value)
     Object.assign(params, userFilterParams)
@@ -637,6 +650,21 @@ async function selectError(id: number) {
     selectedDetail.value = detail
     correlatedUpstreamErrors.value = upstream.items || []
     fetchSchedulerAccounts(detail)
+
+    // Mark as read if unread
+    if (detail && !detail.is_read) {
+      try {
+        await markRequestErrorsRead({
+          start_time: new Date(startTime.value).toISOString(),
+          end_time: new Date(endTime.value).toISOString(),
+          view: 'all'
+        }, true)
+        const item = requestErrors.value.find(e => e.id === id)
+        if (item) item.is_read = true
+      } catch {
+        // Silent fail — not critical
+      }
+    }
   } catch (err: any) {
     if (fetchSeq !== detailFetchSeq || selectedErrorId.value !== id) return
 
@@ -700,6 +728,11 @@ watch(searchQuery, () => debouncedSearch())
 watch(userFilter, () => debouncedSearch())
 
 watch([startTime, endTime, statusCodeFilter], () => {
+  page.value = 1
+  fetchRequestErrors({ keepSelection: false })
+})
+
+watch(readStatusFilter, () => {
   page.value = 1
   fetchRequestErrors({ keepSelection: false })
 })

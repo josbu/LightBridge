@@ -922,6 +922,7 @@ export interface OpsErrorLog {
   requested_model?: string
   upstream_model?: string
   request_type?: number | null
+  is_read?: boolean
 }
 
 export interface OpsErrorDetail extends OpsErrorLog {
