@@ -108,6 +108,18 @@
         </div>
       </div>
 
+      <div class="flex justify-end">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          :disabled="exporting"
+          @click="handleExportTXT"
+        >
+          <Icon name="download" size="sm" />
+          <span>{{ t('admin.ops.errorDetail.exportTXT') }}</span>
+        </button>
+      </div>
+
       <!-- Response content (client request -> error_body; upstream -> upstream_error_detail/message) -->
       <div class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900">
         <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.responseBody') }}</h3>
@@ -196,6 +208,9 @@ import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
 import { resolvePrimaryResponseBody, resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { exportSingleErrorTXT } from '../utils/errorExport'
+import type { ErrorExportData } from '../utils/errorExport'
+import { buildErrorAnalysis } from '../utils/errorAnalysis'
 
 interface Props {
   show: boolean
@@ -215,6 +230,7 @@ const appStore = useAppStore()
 
 const loading = ref(false)
 const detail = ref<OpsErrorDetail | null>(null)
+const exporting = ref(false)
 
 const showUpstreamList = computed(() => props.errorType === 'request')
 
@@ -305,6 +321,23 @@ async function fetchCorrelatedUpstreamErrors(requestErrorId: number) {
 
 function close() {
   emit('update:show', false)
+}
+
+function handleExportTXT() {
+  if (!detail.value) return
+  exporting.value = true
+  try {
+    const analysis = buildErrorAnalysis(detail.value, correlatedUpstreamErrors.value)
+    const data: ErrorExportData = {
+      detail: detail.value,
+      analysis,
+      upstreamErrors: correlatedUpstreamErrors.value,
+      version: appStore.currentVersion,
+    }
+    exportSingleErrorTXT(data)
+  } finally {
+    exporting.value = false
+  }
 }
 
 function prettyJSON(raw?: string): string {
