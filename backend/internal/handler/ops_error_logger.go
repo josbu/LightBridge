@@ -551,7 +551,13 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 					}
 				}
 			}
-			if !hasUpstreamContext {
+			// Also log routing-capacity errors (e.g. "no available accounts") that occur in streaming
+			// mode. When streamStarted=true, handleStreamingAwareError sends an SSE event but does
+			// NOT set the HTTP status code (it stays 200), so the status < 400 branch is entered.
+			// Without upstream error context these would be silently dropped. The routing-capacity
+			// flag is set by markOpsRoutingCapacityLimitedIfNoAvailable before the error response.
+			routingCapacityLimited := isOpsRoutingCapacityLimited(c)
+			if !hasUpstreamContext && !routingCapacityLimited {
 				return
 			}
 
@@ -647,8 +653,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 			}
 
-			// If we still have nothing meaningful, skip.
-			if upstreamStatusCode == nil && upstreamErrorMessage == nil && upstreamErrorDetail == nil && len(events) == 0 {
+			// If we still have nothing meaningful, skip — unless this is a routing-capacity
+			// error (e.g. "no available accounts") which should always be logged.
+			if upstreamStatusCode == nil && upstreamErrorMessage == nil && upstreamErrorDetail == nil && len(events) == 0 && !routingCapacityLimited {
 				return
 			}
 
@@ -657,12 +664,28 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				effectiveUpstreamStatus = *upstreamStatusCode
 			}
 
-			recoveredMsg := "Recovered upstream error"
-			if effectiveUpstreamStatus > 0 {
-				recoveredMsg += " " + strconvItoa(effectiveUpstreamStatus)
+			// For routing-capacity errors in streaming mode, the intended error status is 503
+			// (not the HTTP 200 that the SSE response carries).
+			effectiveStatus := status
+			if routingCapacityLimited && status < 400 {
+				effectiveStatus = 503
 			}
-			if upstreamErrorMessage != nil && strings.TrimSpace(*upstreamErrorMessage) != "" {
-				recoveredMsg += ": " + strings.TrimSpace(*upstreamErrorMessage)
+
+			recoveredMsg := "Recovered upstream error"
+			if routingCapacityLimited && !hasUpstreamContext {
+				// Routing-capacity error: derive message from the error body captured by the
+				// response writer (the handler wrote a JSON 503 before the SSE fallback).
+				recoveredMsg = parseOpsErrorResponse(w.buf.Bytes()).Message
+				if recoveredMsg == "" {
+					recoveredMsg = "No available accounts"
+				}
+			} else {
+				if effectiveUpstreamStatus > 0 {
+					recoveredMsg += " " + strconvItoa(effectiveUpstreamStatus)
+				}
+				if upstreamErrorMessage != nil && strings.TrimSpace(*upstreamErrorMessage) != "" {
+					recoveredMsg += ": " + strings.TrimSpace(*upstreamErrorMessage)
+				}
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
 
@@ -705,19 +728,18 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}(),
 				UserAgent: c.GetHeader("User-Agent"),
 
-				ErrorPhase: "upstream",
-				ErrorType:  "upstream_error",
-				// Severity should reflect the upstream failure, not the final client status (200).
-				Severity:          classifyOpsSeverity("upstream_error", effectiveUpstreamStatus),
-				StatusCode:        status,
-				IsBusinessLimited: false,
+				ErrorPhase:        classifyOpsPhase("api_error", recoveredMsg, ""),
+				ErrorType:         "api_error",
+				Severity:          classifyOpsSeverity("api_error", effectiveStatus),
+				StatusCode:        effectiveStatus,
+				IsBusinessLimited: routingCapacityLimited,
 				IsCountTokens:     isCountTokensRequest(c),
 
 				ErrorMessage: recoveredMsg,
-				ErrorBody:    "",
+				ErrorBody:    string(w.buf.Bytes()),
 
-				ErrorSource: "upstream_http",
-				ErrorOwner:  "provider",
+				ErrorSource: "gateway",
+				ErrorOwner:  "platform",
 
 				UpstreamStatusCode:   upstreamStatusCode,
 				UpstreamErrorMessage: upstreamErrorMessage,

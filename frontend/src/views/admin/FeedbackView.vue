@@ -1,16 +1,5 @@
 <template>
-  <TablePageLayout>
-    <template #header>
-      <div>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-          {{ t('admin.feedback.title') }}
-        </h1>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {{ t('admin.feedback.description') }}
-        </p>
-      </div>
-    </template>
-
+  <AppLayout>
     <div class="space-y-6">
       <!-- Quick Actions -->
       <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-dark-700 dark:bg-dark-800">
@@ -86,12 +75,12 @@
         </div>
       </div>
     </div>
-  </TablePageLayout>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
 
 const { t } = useI18n()
 

@@ -26,6 +26,7 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <!-- Base URL, Protocol, API Key fields -->
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <!-- AIStudio 反代模式标识 -->
@@ -78,7 +79,75 @@
               : t('admin.accounts.leaveEmptyToKeep')
           }}</p>
         </div>
+      </div>
 
+      <!-- Upstream fields (only for upstream type) -->
+      <div v-if="account.type === 'upstream'" class="space-y-4">
+        <div>
+          <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
+          <input
+            v-model="editBaseUrl"
+            type="text"
+            class="input"
+            placeholder="https://cloudcode-pa.googleapis.com"
+          />
+          <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
+          <input
+            v-model="editApiKey"
+            type="password"
+            class="input font-mono"
+            placeholder="sk-..."
+          />
+          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+        </div>
+      </div>
+
+      <!-- Custom platform: Protocol, Base URL, API Key -->
+      <div
+        v-if="account?.platform === 'custom'"
+        class="space-y-4"
+      >
+        <div>
+          <label class="input-label">{{ t('admin.accounts.custom.protocol') }}</label>
+          <select v-model="editCustomProtocol" class="input">
+            <option value="">{{ t('admin.accounts.custom.selectProtocol') }}</option>
+            <option v-for="opt in customProtocolOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.custom.protocolHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.custom.baseUrl') }}</label>
+          <input
+            v-model="editCustomBaseUrl"
+            type="url"
+            class="input"
+            placeholder="https://api.example.com/v1"
+          />
+          <p class="input-hint">{{ t('admin.accounts.custom.baseUrlHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+          <input
+            v-model="editCustomApiKey"
+            type="password"
+            class="input font-mono"
+            autocomplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            :placeholder="t('admin.accounts.leaveEmptyToKeep')"
+          />
+          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+        </div>
+      </div>
+
+      <!-- Model Restriction Section (only for apikey type) -->
+      <div v-if="account.type === 'apikey'" class="space-y-4">
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -179,21 +248,62 @@
                 </p>
               </div>
 
-            <!-- Model Mapping List -->
-            <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
-              <div
-                v-for="(mapping, index) in modelMappings"
-                :key="getModelMappingKey(mapping)"
-                class="flex items-center gap-2"
+              <!-- Model Mapping List -->
+              <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
+                <div
+                  v-for="(mapping, index) in modelMappings"
+                  :key="getModelMappingKey(mapping)"
+                  class="flex items-center gap-2"
+                >
+                  <input
+                    v-model="mapping.from"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.requestModel')"
+                  />
+                  <svg
+                    class="h-4 w-4 flex-shrink-0 text-gray-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14 5l7 7m0 0l-7 7m7-7H3"
+                    />
+                  </svg>
+                  <input
+                    v-model="mapping.to"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.actualModel')"
+                  />
+                  <button
+                    type="button"
+                    @click="removeModelMapping(index)"
+                    class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                  >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                @click="addModelMapping"
+                class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
               >
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
                 <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400"
+                  class="mr-1 inline h-4 w-4"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -202,52 +312,11 @@
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
+                    d="M12 4v16m8-8H4"
                   />
                 </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-            >
-              <svg
-                class="mr-1 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              {{ t('admin.accounts.addMapping') }}
-            </button>
+                {{ t('admin.accounts.addMapping') }}
+              </button>
 
               <!-- Quick Add Buttons -->
               <div class="flex flex-wrap gap-2">
@@ -563,30 +632,6 @@
             </div>
           </div>
         </template>
-      </div>
-
-      <!-- Upstream fields (only for upstream type) -->
-      <div v-if="account.type === 'upstream'" class="space-y-4">
-        <div>
-          <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
-          <input
-            v-model="editBaseUrl"
-            type="text"
-            class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
-          />
-          <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
-          <input
-            v-model="editApiKey"
-            type="password"
-            class="input font-mono"
-            placeholder="sk-..."
-          />
-          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
-        </div>
       </div>
 
       <!-- Vertex Service Account -->
@@ -1523,47 +1568,6 @@
           <div class="w-56">
             <Select v-model="geminiRelayMode" :options="relayModeOptions" />
           </div>
-        </div>
-      </div>
-
-      <!-- Custom platform: Protocol, Base URL, API Key -->
-      <div
-        v-if="account?.platform === 'custom'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div>
-          <label class="input-label">{{ t('admin.accounts.custom.protocol') }}</label>
-          <select v-model="editCustomProtocol" class="input">
-            <option value="">{{ t('admin.accounts.custom.selectProtocol') }}</option>
-            <option v-for="opt in customProtocolOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-          <p class="input-hint">{{ t('admin.accounts.custom.protocolHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.custom.baseUrl') }}</label>
-          <input
-            v-model="editCustomBaseUrl"
-            type="url"
-            class="input"
-            placeholder="https://api.example.com/v1"
-          />
-          <p class="input-hint">{{ t('admin.accounts.custom.baseUrlHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
-          <input
-            v-model="editCustomApiKey"
-            type="password"
-            class="input font-mono"
-            autocomplete="new-password"
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore="true"
-            :placeholder="t('admin.accounts.leaveEmptyToKeep')"
-          />
-          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
       </div>
 
