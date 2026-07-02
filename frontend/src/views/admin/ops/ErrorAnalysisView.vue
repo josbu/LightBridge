@@ -284,8 +284,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 gap-5 p-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
-              <div class="space-y-5">
+            <div class="space-y-5 p-5">
                 <div>
                   <div class="mb-3 flex items-center justify-between gap-3">
                     <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.errorAnalysis.stepFlow') }}</h3>
@@ -439,9 +438,7 @@
                   </div>
                   <pre v-if="showRaw" class="mt-3 max-h-[360px] overflow-auto rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100"><code>{{ prettyJSON(primaryResponseBody) }}</code></pre>
                 </div>
-              </div>
 
-              <aside class="space-y-4">
                 <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
                   <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.errorAnalysis.suggestions') }}</h3>
                   <div class="mt-3 space-y-2">
@@ -482,8 +479,7 @@
                     </div>
                   </div>
                 </div>
-              </aside>
-            </div>
+              </div>
           </div>
         </section>
       </div>
