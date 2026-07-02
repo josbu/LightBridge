@@ -48,7 +48,7 @@ func (s *ModuleStore) SavePermissions(ctx context.Context, moduleID string, perm
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM module_permissions WHERE module_id=$1`, moduleID); err != nil {
 		return err
 	}

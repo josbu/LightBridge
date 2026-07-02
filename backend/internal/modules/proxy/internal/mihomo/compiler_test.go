@@ -40,8 +40,10 @@ func TestCompileGeneratesPinnedLocalRuntimeConfig(t *testing.T) {
 	require.NotContains(t, doc, "rule-providers")
 	require.NotContains(t, doc, "script")
 
-	proxies := doc["proxies"].([]any)
-	firstProxy := proxies[0].(map[string]any)
+	proxies, ok := doc["proxies"].([]any)
+	require.True(t, ok)
+	firstProxy, ok := proxies[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "lb-node-34", firstProxy["name"])
 	require.Equal(t, "proxy.example.com", firstProxy["server"])
 

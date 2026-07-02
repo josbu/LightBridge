@@ -89,7 +89,7 @@ func normalizeImportDataPayload(raw json.RawMessage) (DataPayload, error) {
 	}
 
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return DataPayload{}, fmt.Errorf("Invalid data JSON: %w", err)
+		return DataPayload{}, fmt.Errorf("invalid data JSON: %w", err)
 	}
 	return DataPayload{}, validateDataHeader(payload)
 }
@@ -104,7 +104,7 @@ func looksLikeLightBridgeData(payload DataPayload) bool {
 func convertCPAImportPayload(raw json.RawMessage) (DataPayload, bool, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &probe); err != nil {
-		return DataPayload{}, false, fmt.Errorf("Invalid data JSON: %w", err)
+		return DataPayload{}, false, fmt.Errorf("invalid data JSON: %w", err)
 	}
 	if !looksLikeCPAImportPayload(probe) {
 		return DataPayload{}, false, nil
@@ -112,7 +112,7 @@ func convertCPAImportPayload(raw json.RawMessage) (DataPayload, bool, error) {
 
 	var src cpaImportPayload
 	if err := json.Unmarshal(raw, &src); err != nil {
-		return DataPayload{}, false, fmt.Errorf("Invalid CPA data JSON: %w", err)
+		return DataPayload{}, false, fmt.Errorf("invalid CPA data JSON: %w", err)
 	}
 	if rawAccount, ok := probe["account"]; ok {
 		if isJSONObject(rawAccount) {

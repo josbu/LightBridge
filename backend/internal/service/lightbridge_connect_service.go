@@ -179,7 +179,7 @@ func (s *LightBridgeConnectService) VerifyNewAPIToken(ctx context.Context, insta
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to New API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -324,7 +324,7 @@ func (s *LightBridgeConnectService) sendWebhook(ctx context.Context, webhookURL 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)

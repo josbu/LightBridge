@@ -37,7 +37,7 @@ func (p *packageInstaller) InstallArchive(ctx context.Context, archivePath strin
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	if err := extractTarZst(archivePath, tmp); err != nil {
 		return nil, err
 	}
@@ -126,9 +126,6 @@ func (p *packageInstaller) VerifyInstalled(ctx context.Context, module Installed
 	if verified.InstalledAt.IsZero() {
 		verified.InstalledAt = time.Now().UTC()
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return &verified, nil
 }
 
@@ -173,7 +170,7 @@ func extractTarZst(archivePath, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	zr, err := zstd.NewReader(f)
 	if err != nil {
 		return err
@@ -237,7 +234,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		defer in.Close()
+		defer func() { _ = in.Close() }()
 		mode := info.Mode().Perm()
 		if mode == 0 {
 			mode = 0o644
@@ -246,7 +243,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		defer out.Close()
+		defer func() { _ = out.Close() }()
 		if _, err = io.Copy(out, in); err != nil {
 			return err
 		}

@@ -488,18 +488,18 @@ func privacyRulesSignature(cfg *PrivacyFilterConfig) string {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		b.WriteString(id)
-		b.WriteByte('=')
-		b.WriteString(strconv.FormatBool(cfg.BuiltinRules[id]))
-		b.WriteByte(';')
+		_, _ = b.WriteString(id)
+		_ = b.WriteByte('=')
+		_, _ = b.WriteString(strconv.FormatBool(cfg.BuiltinRules[id]))
+		_ = b.WriteByte(';')
 	}
-	b.WriteString("|custom|")
+	_, _ = b.WriteString("|custom|")
 	for _, r := range cfg.CustomRules {
 		if !r.Enabled {
 			continue
 		}
-		b.WriteString(r.Pattern)
-		b.WriteByte('\x00')
+		_, _ = b.WriteString(r.Pattern)
+		_ = b.WriteByte('\x00')
 		b.WriteString(r.Replacement)
 		b.WriteByte('\n')
 	}

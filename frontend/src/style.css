@@ -70,7 +70,7 @@
     @apply rounded-xl px-4 py-2.5 text-sm font-medium;
     @apply transition-all duration-200 ease-out;
     @apply focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:ring-offset-2;
-    @apply disabled:transform-none disabled:cursor-not-allowed disabled:opacity-50;
+    @apply disabled:transform-none disabled:cursor-not-allowed disabled:opacity-60;
     @apply active:scale-[0.98];
   }
 
@@ -787,8 +787,8 @@
     --lb-bg-page: #0b0b0b;
     --lb-bg-surface: #141414;
     --lb-bg-card: #101010;
-    --lb-border: #2a2a2a;
-    --lb-border-strong: #3a3a3a;
+    --lb-border: #333333;
+    --lb-border-strong: #444444;
     --lb-text-main: #f3f3f3;
     --lb-text-secondary: #a3a3a3;
     --lb-text-muted: #686868;
@@ -821,12 +821,13 @@
   .btn-lg,
   .btn-sm,
   .btn-icon {
-    @apply rounded-none shadow-none;
+    @apply rounded-none;
     font-family: var(--lb-font-display);
     border: 1px solid var(--lb-border);
     background: var(--lb-bg-card);
     color: var(--lb-text-main);
     transform: none !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   }
 
   .btn:hover,
@@ -844,7 +845,7 @@
     background: var(--lb-action-bg) !important;
     border-color: var(--lb-action-bg) !important;
     color: var(--lb-action-text) !important;
-    box-shadow: none !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
   }
 
   .btn-danger {
@@ -1558,7 +1559,6 @@
   .select-dropdown-portal button,
   [class*='announcement'] button {
     border-radius: 0 !important;
-    box-shadow: none !important;
   }
 
   .lightbridge-ops button[class*='bg-blue-'],

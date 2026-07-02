@@ -406,6 +406,7 @@ export default {
     channelStatus: '渠道状态',
     riskControl: '风控中心',
     privacyFilter: '隐私过滤',
+    feedback: '问题反馈',
   },
 
   docs: {
@@ -5000,6 +5001,19 @@ export default {
           canceled: '已取消'
         }
       }
+    },
+
+    // Feedback
+    feedback: {
+      title: '问题反馈',
+      description: '提交反馈、报告问题或联系客服支持',
+      quickActions: '快速操作',
+      githubIssue: 'GitHub Issue',
+      githubIssueDesc: '在 GitHub 上报告问题或请求功能',
+      linuxDoProfile: 'LinuxDo 主页',
+      contactInfo: '联系信息',
+      howToReport: '如何报告问题',
+      howToReportDesc: '报告问题时请包含：1) 重现步骤，2) 期望行为，3) 实际行为，4) 浏览器/操作系统信息。'
     },
 
     // Ops Monitoring

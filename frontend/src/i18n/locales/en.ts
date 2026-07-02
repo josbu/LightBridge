@@ -406,6 +406,7 @@ export default {
     channelStatus: 'Channel Status',
     riskControl: 'Risk Control',
     privacyFilter: 'Privacy Filter',
+    feedback: 'Feedback',
   },
 
   docs: {
@@ -4847,6 +4848,19 @@ export default {
           canceled: 'Canceled'
         }
       }
+    },
+
+    // Feedback
+    feedback: {
+      title: 'Feedback',
+      description: 'Submit feedback, report issues, or contact support',
+      quickActions: 'Quick Actions',
+      githubIssue: 'GitHub Issue',
+      githubIssueDesc: 'Report bugs or request features on GitHub',
+      linuxDoProfile: 'LinuxDo Profile',
+      contactInfo: 'Contact Information',
+      howToReport: 'How to Report Issues',
+      howToReportDesc: 'For bug reports, please include: 1) Steps to reproduce, 2) Expected behavior, 3) Actual behavior, 4) Browser/OS information.'
     },
 
     // Ops Monitoring

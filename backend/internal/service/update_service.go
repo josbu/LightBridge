@@ -675,11 +675,6 @@ func normalizeVersionString(v string) string {
 	return strings.TrimPrefix(strings.TrimSpace(v), "v")
 }
 
-func parseVersion(v string) [3]int {
-	main, _ := parseSemanticVersion(v)
-	return main
-}
-
 func parseSemanticVersion(v string) ([3]int, string) {
 	v = normalizeVersionString(v)
 	if idx := strings.IndexByte(v, '+'); idx >= 0 {

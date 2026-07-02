@@ -261,7 +261,7 @@ func (h *GatewayHandler) forwardGeminiNativeViaProtocolRouter(
 		capture, rec := cloneGinContextForProtocolCapture(c, routeCtx, "/v1/messages", claudeBody)
 		result, err := h.gatewayService.Forward(routeCtx, capture, account, parsedReq)
 		if err != nil {
-			service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName)
+			_ = service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName)
 			return protocolForwardResult{Gateway: result}, err
 		}
 		if writeErr := service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName); writeErr != nil {
@@ -281,7 +281,7 @@ func (h *GatewayHandler) forwardGeminiNativeViaProtocolRouter(
 		capture, rec := cloneGinContextForProtocolCapture(c, routeCtx, "/v1/messages", claudeBody)
 		result, err := h.openAIGatewayService.ForwardAsAnthropic(routeCtx, capture, account, claudeBody, "", modelName)
 		if err != nil {
-			service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName)
+			_ = service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName)
 			return protocolForwardResult{OpenAI: result}, err
 		}
 		if writeErr := service.WriteCapturedAnthropicAsGemini(c, rec.Code, rec.Header(), rec.Body.Bytes(), stream, modelName); writeErr != nil {

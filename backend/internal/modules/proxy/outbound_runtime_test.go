@@ -16,7 +16,7 @@ func TestOutboundRuntimeRegistersResolver(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	var _ *sql.DB = db
+	var _ = db
 
 	registry := outbound.NewRegistry()
 	runtime := NewOutboundRuntime(registry, db)

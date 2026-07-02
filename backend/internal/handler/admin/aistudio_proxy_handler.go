@@ -22,9 +22,9 @@ import (
 // guided browser login. It owns no state beyond references to the manager and
 // the account service.
 type AistudioProxyHandler struct {
-	manager       *aistudio_proxy.Manager
+	manager        *aistudio_proxy.Manager
 	accountService *service.AccountService
-	httpClient    *http.Client
+	httpClient     *http.Client
 }
 
 // NewAistudioProxyHandler constructs the handler. accountService may be nil in

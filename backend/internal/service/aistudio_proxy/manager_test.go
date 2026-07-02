@@ -25,7 +25,7 @@ func TestManagerNilSafe(t *testing.T) {
 		t.Fatalf("nil Manager.StatusOf() = %q, want %q", got, StatusStopped)
 	}
 	m.StopAll() // must not panic
-	if _, err := m.EnsureRunning(nil, 1); err == nil {
+	if _, err := m.EnsureRunning(context.TODO(), 1); err == nil {
 		t.Fatal("nil Manager.EnsureRunning() should error")
 	}
 }

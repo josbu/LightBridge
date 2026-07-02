@@ -161,9 +161,7 @@ func selectRegistryEntry(registry *Registry, id string, version string) (Registr
 }
 
 func downloadFile(ctx context.Context, url string, targetPath string, timeoutSeconds int) error {
-	if strings.HasPrefix(url, "file://") {
-		url = strings.TrimPrefix(url, "file://")
-	}
+	url = strings.TrimPrefix(url, "file://")
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		in, err := os.Open(url)
 		if err != nil {

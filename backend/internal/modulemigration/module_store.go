@@ -18,7 +18,7 @@ func (s *sqlModuleStore) ListInstalled(ctx context.Context) ([]modules.Installed
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []modules.InstalledModule
 	for rows.Next() {
 		m, err := scanInstalledModule(rows)
@@ -48,7 +48,7 @@ func (s *sqlModuleStore) SavePermissions(ctx context.Context, moduleID string, p
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM module_permissions WHERE module_id=$1`, moduleID); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (s *sqlModuleStore) ListPermissions(ctx context.Context, moduleID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []modules.PermissionRecord
 	for rows.Next() {
 		var p modules.PermissionRecord

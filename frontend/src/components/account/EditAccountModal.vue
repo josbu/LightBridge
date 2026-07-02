@@ -1526,6 +1526,47 @@
         </div>
       </div>
 
+      <!-- Custom platform: Protocol, Base URL, API Key -->
+      <div
+        v-if="account?.platform === 'custom'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+      >
+        <div>
+          <label class="input-label">{{ t('admin.accounts.custom.protocol') }}</label>
+          <select v-model="editCustomProtocol" class="input">
+            <option value="">{{ t('admin.accounts.custom.selectProtocol') }}</option>
+            <option v-for="opt in customProtocolOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.custom.protocolHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.custom.baseUrl') }}</label>
+          <input
+            v-model="editCustomBaseUrl"
+            type="url"
+            class="input"
+            placeholder="https://api.example.com/v1"
+          />
+          <p class="input-hint">{{ t('admin.accounts.custom.baseUrlHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+          <input
+            v-model="editCustomApiKey"
+            type="password"
+            class="input font-mono"
+            autocomplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            :placeholder="t('admin.accounts.leaveEmptyToKeep')"
+          />
+          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+        </div>
+      </div>
+
       <!-- Custom relay mode -->
       <div
         v-if="account?.platform === 'custom'"
@@ -2628,6 +2669,9 @@ const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inhe
 const anthropicRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
 const geminiRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
 const customRelayMode = ref<RelayMode>(RELAY_MODE_ROUTER)
+const editCustomProtocol = ref('')
+const editCustomBaseUrl = ref('')
+const editCustomApiKey = ref('')
 const openaiPassthroughEnabled = computed({
   get: () => openaiRelayMode.value === RELAY_MODE_FULL_PASSTHROUGH,
   set: (enabled: boolean) => {
@@ -2675,6 +2719,13 @@ const relayModeHintKey = (mode: RelayMode) => {
   if (mode === RELAY_MODE_FULL_PASSTHROUGH) return 'admin.accounts.relayMode.fullPassthroughDesc'
   return 'admin.accounts.relayMode.routerDesc'
 }
+const customProtocolOptions = computed(() => [
+  { value: 'openai_responses', label: t('admin.accounts.custom.protocolOptions.openai_responses') },
+  { value: 'openai_chat_completions', label: t('admin.accounts.custom.protocolOptions.openai_chat_completions') },
+  { value: 'openai_embeddings', label: t('admin.accounts.custom.protocolOptions.openai_embeddings') },
+  { value: 'anthropic_messages', label: t('admin.accounts.custom.protocolOptions.anthropic_messages') },
+  { value: 'gemini', label: t('admin.accounts.custom.protocolOptions.gemini') }
+])
 const openaiResponsesWebSocketV2Mode = computed({
   get: () => {
     if (props.account?.type === 'apikey') {
@@ -3022,8 +3073,14 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   geminiRelayMode.value = RELAY_MODE_ROUTER
   webSearchEmulationMode.value = 'default'
   customRelayMode.value = RELAY_MODE_ROUTER
+  editCustomProtocol.value = ''
+  editCustomBaseUrl.value = ''
+  editCustomApiKey.value = ''
   if (newAccount.platform === 'custom') {
     customRelayMode.value = normalizeRelayMode(extra)
+    const customCredentials = newAccount.credentials as Record<string, unknown> | undefined
+    editCustomProtocol.value = (customCredentials?.protocol as string) || ''
+    editCustomBaseUrl.value = (customCredentials?.base_url as string) || ''
   }
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
     openaiRelayMode.value = normalizeRelayMode(extra)
@@ -4215,8 +4272,28 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    // For Custom accounts, handle relay mode in extra.
+    // For Custom accounts, handle credentials update (protocol, base_url, api_key) and relay mode in extra.
     if (props.account.platform === 'custom') {
+      const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
+      const newCredentials: Record<string, unknown> = { ...currentCredentials }
+
+      // Update protocol
+      if (editCustomProtocol.value) {
+        newCredentials.protocol = editCustomProtocol.value
+      }
+
+      // Update base URL
+      if (editCustomBaseUrl.value.trim()) {
+        newCredentials.base_url = editCustomBaseUrl.value.trim()
+      }
+
+      // Update API key (only if provided, otherwise keep existing)
+      if (editCustomApiKey.value.trim()) {
+        newCredentials.api_key = editCustomApiKey.value.trim()
+      }
+
+      updatePayload.credentials = newCredentials
+
       const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
         (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }

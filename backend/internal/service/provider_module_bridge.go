@@ -158,7 +158,7 @@ func (s *GatewayService) writeModuleProviderEvents(ctx context.Context, c *gin.C
 					}
 					writeModuleSSEData(c, ev.Data)
 				} else {
-					buffered.Write(ev.Data)
+					_, _ = buffered.Write(ev.Data)
 				}
 			case "usage":
 				if ev.Usage != nil {

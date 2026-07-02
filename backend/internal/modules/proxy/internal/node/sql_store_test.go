@@ -13,7 +13,7 @@ func TestSQLStoreListProfileNodes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	var _ *sql.DB = db
+	var _ = db
 
 	mock.ExpectQuery("SELECT n.id, n.name, n.node_type, n.source_type").
 		WithArgs(int64(100)).
