@@ -5441,7 +5441,9 @@ export default {
             daily_quota_exhausted: '日配额已耗尽',
             weekly_quota_exhausted: '周配额已耗尽',
             session_window_rejected: '会话窗口被拒绝',
-            model_not_allowed: '请求模型不在该账号允许范围内'
+            model_not_allowed: '请求模型不在该账号允许范围内',
+            model_rate_limited: '模型级限流',
+            quota_auto_paused: '配额自动暂停'
           }
         },
         confidenceLevel: {

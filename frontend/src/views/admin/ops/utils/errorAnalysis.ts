@@ -60,6 +60,8 @@ export type ErrorAnalysisAccountReasonKey =
   | 'weekly_quota_exhausted'
   | 'session_window_rejected'
   | 'model_not_allowed'
+  | 'model_rate_limited'
+  | 'quota_auto_paused'
 
 export interface ErrorAnalysisAccountReason {
   key: ErrorAnalysisAccountReasonKey
@@ -473,6 +475,42 @@ export function diagnoseSchedulerAccount(
 
   if (model && !accountAllowsModel(account, model)) {
     reasons.push({ key: 'model_not_allowed', detail: model })
+  }
+
+  // Model-level rate limit (extra.model_rate_limits)
+  if (model) {
+    const modelRateLimits = (account.extra as Record<string, unknown> | undefined)?.model_rate_limits as Record<string, { rate_limited_at?: string; rate_limit_reset_at?: string }> | undefined
+    if (modelRateLimits && typeof modelRateLimits === 'object') {
+      const limitEntry = modelRateLimits[model]
+      if (limitEntry && isFuture(limitEntry.rate_limit_reset_at, now)) {
+        reasons.push({ key: 'model_rate_limited', detail: `${model}: resets at ${limitEntry.rate_limit_reset_at || '?'}` })
+      }
+    }
+  }
+
+  // OpenAI quota auto-pause (5h / 7d utilization threshold)
+  if (account.platform === 'openai' || account.platform === 'antigravity') {
+    const extra = (account.extra as Record<string, unknown> | undefined) ?? {}
+    for (const window of ['5h', '7d'] as const) {
+      const disabledKey = `auto_pause_${window}_disabled`
+      if (extra[disabledKey]) continue
+      const threshold = Number(extra[`auto_pause_threshold_${window}`] ?? 0)
+      if (threshold <= 0) continue
+      const statsKey = `usage_${window}_requests`
+      const limitKey = `quota_${window}_requests`
+      const stats = extra[statsKey] as Record<string, unknown> | undefined
+      const limit = extra[limitKey] as Record<string, unknown> | undefined
+      if (stats && limit) {
+        const used = Number(stats.used ?? stats.total ?? 0)
+        const max = Number(limit.limit ?? limit.total ?? 0)
+        if (max > 0) {
+          const utilization = used / max
+          if (utilization >= threshold) {
+            reasons.push({ key: 'quota_auto_paused', detail: `${window}: ${(utilization * 100).toFixed(0)}% utilized (threshold ${(threshold * 100).toFixed(0)}%)` })
+          }
+        }
+      }
+    }
   }
 
   return {

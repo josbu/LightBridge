@@ -5282,7 +5282,9 @@ export default {
             daily_quota_exhausted: 'Daily quota exhausted',
             weekly_quota_exhausted: 'Weekly quota exhausted',
             session_window_rejected: 'Session window rejected',
-            model_not_allowed: 'Requested model is not allowed by this account'
+            model_not_allowed: 'Requested model is not allowed by this account',
+            model_rate_limited: 'Model-level rate limit active',
+            quota_auto_paused: 'Quota auto-pause threshold exceeded'
           }
         },
         confidenceLevel: {
