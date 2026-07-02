@@ -98,7 +98,7 @@ func looksLikeLightBridgeData(payload DataPayload) bool {
 	if payload.Type == dataType || payload.Type == legacyDataType {
 		return true
 	}
-	return payload.Type == "" && payload.Proxies != nil && payload.Accounts != nil
+	return payload.Type == "" && payload.Accounts != nil
 }
 
 func convertCPAImportPayload(raw json.RawMessage) (DataPayload, bool, error) {

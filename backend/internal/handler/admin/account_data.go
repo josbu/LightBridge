@@ -709,7 +709,7 @@ func validateDataHeader(payload DataPayload) error {
 		return fmt.Errorf("unsupported data version: %d", payload.Version)
 	}
 	if payload.Proxies == nil {
-		return errors.New("proxies is required")
+		payload.Proxies = []DataProxy{}
 	}
 	if payload.Accounts == nil {
 		return errors.New("accounts is required")
