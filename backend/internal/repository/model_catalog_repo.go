@@ -78,7 +78,7 @@ func (r *modelCatalogRepository) ReplaceAccountModels(ctx context.Context, accou
 		Status:       service.ModelCatalogSyncStatusOK,
 		ModelCount:   len(modelIDs),
 		SyncBatchID:  batchID,
-		LastSyncedAt: ptrTime(time.Now()),
+		LastSyncedAt: modelCatalogPtrTime(time.Now()),
 		UpdatedAt:    time.Now(),
 	}
 	if err := upsertModelSyncState(ctx, tx, state); err != nil {
@@ -100,7 +100,7 @@ func (r *modelCatalogRepository) RecordAccountSyncFailure(ctx context.Context, a
 		Status:       service.ModelCatalogSyncStatusError,
 		ErrorMessage: trimForStorage(message, 1000),
 		SyncBatchID:  fmt.Sprintf("%d-%d", accountID, time.Now().UnixNano()),
-		LastSyncedAt: ptrTime(time.Now()),
+		LastSyncedAt: modelCatalogPtrTime(time.Now()),
 		UpdatedAt:    time.Now(),
 	}
 	if err := upsertModelSyncState(ctx, r.db, state); err != nil {
@@ -282,7 +282,7 @@ func uniqueInt64s(ids []int64) []int64 {
 	return out
 }
 
-func ptrTime(t time.Time) *time.Time {
+func modelCatalogPtrTime(t time.Time) *time.Time {
 	return &t
 }
 
