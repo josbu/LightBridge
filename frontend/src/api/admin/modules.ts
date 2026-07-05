@@ -26,6 +26,11 @@ export interface MarketplaceModule {
   description_i18n?: LocalizedText
   downloadUrl?: string
   sha256?: string
+  signature?: string
+  core?: string
+  capabilities?: string[]
+  installedStatus?: string
+  installedVersion?: string
 }
 
 export interface MarketplaceResult {

@@ -44,6 +44,9 @@ export const useAppStore = defineStore('app', () => {
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
+  let publicSettingsRequest: Promise<PublicSettings | null> | null = null
+  let publicSettingsRequestSequence = 0
+  let ignorePublicSettingsResponsesThrough = 0
 
   // ==================== Computed ====================
 
@@ -301,6 +304,15 @@ export const useAppStore = defineStore('app', () => {
     publicSettingsLoaded.value = true
   }
 
+  function patchPublicSettings(patch: Partial<PublicSettings>): PublicSettings | null {
+    const current = cachedPublicSettings.value || window.__APP_CONFIG__ || null
+    if (!current) return null
+
+    const next = { ...current, ...patch } as PublicSettings
+    applySettings(next)
+    return next
+  }
+
   /**
    * Fetch public settings (uses cache unless force=true)
    * @param force - Force refresh from API
@@ -369,22 +381,40 @@ export const useAppStore = defineStore('app', () => {
       }
     }
 
-    // Prevent duplicate requests
+    // Share duplicate non-forced requests. Forced refreshes must not be swallowed:
+    // wait for the in-flight response, ignore it if needed, then fetch a fresh
+    // snapshot so module toggles cannot be reverted by stale public settings.
     if (publicSettingsLoading.value) {
-      return null
+      if (!force) {
+        return publicSettingsRequest
+      }
+      ignorePublicSettingsResponsesThrough = Math.max(
+        ignorePublicSettingsResponsesThrough,
+        publicSettingsRequestSequence,
+      )
+      await publicSettingsRequest
+      return fetchPublicSettings(true)
     }
 
     publicSettingsLoading.value = true
-    try {
+    const requestSequence = ++publicSettingsRequestSequence
+    const request = (async () => {
       const data = await fetchPublicSettingsAPI()
-      applySettings(data)
+      if (requestSequence > ignorePublicSettingsResponsesThrough) {
+        applySettings(data)
+      }
       return data
-    } catch (error) {
+    })().catch((error) => {
       console.error('Failed to fetch public settings:', error)
       return null
-    } finally {
-      publicSettingsLoading.value = false
-    }
+    }).finally(() => {
+      if (publicSettingsRequest === request) {
+        publicSettingsRequest = null
+        publicSettingsLoading.value = false
+      }
+    })
+    publicSettingsRequest = request
+    return request
   }
 
   /**
@@ -463,6 +493,7 @@ export const useAppStore = defineStore('app', () => {
 
     // Public settings actions
     fetchPublicSettings,
+    patchPublicSettings,
     clearPublicSettingsCache,
     initFromInjectedConfig
   }

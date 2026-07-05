@@ -1,10 +1,9 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import router, { syncDistributionRoutes } from './router'
+import router, { syncProgressiveRoutes } from './router'
 import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
-import { isDistributionModeNow } from '@/composables/useDeploymentMode'
 import './style.css'
 
 function initThemeClass() {
@@ -28,9 +27,9 @@ async function bootstrap() {
   const appStore = useAppStore()
   appStore.initFromInjectedConfig()
 
-  // 依据注入的 public settings 决定是否注册分发模式路由。
-  // 个人模式下不注册 → 对应 chunk 永不下载（结构性移除）；分发模式注册后按需下载。
-  syncDistributionRoutes(isDistributionModeNow())
+  // Register progressive routes before mount using injected public settings.
+  // Disabled modules stay out of the matcher, so their chunks are not fetched.
+  syncProgressiveRoutes()
 
   // Set document title immediately after config is loaded
   if (appStore.siteName && appStore.siteName !== 'LightBridge') {

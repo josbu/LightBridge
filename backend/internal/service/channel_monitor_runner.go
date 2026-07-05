@@ -55,6 +55,7 @@ type ChannelMonitorRunner struct {
 	tasks   map[int64]*scheduledMonitor
 	wg      sync.WaitGroup
 	started bool
+	active  bool
 	stopped bool
 
 	// inFlight 跟踪正在执行的 monitor.ID。fire 调度前会检查避免重复提交，
@@ -101,17 +102,23 @@ func (r *ChannelMonitorRunner) Start() {
 		return
 	}
 	r.mu.Lock()
-	if r.started || r.stopped {
+	if r.active || r.stopped {
 		r.mu.Unlock()
 		return
 	}
 	r.started = true
+	r.active = true
 	r.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), monitorStartupLoadTimeout)
 	defer cancel()
 	enabled, err := r.svc.ListEnabledMonitors(ctx)
 	if err != nil {
+		r.mu.Lock()
+		if !r.stopped {
+			r.active = false
+		}
+		r.mu.Unlock()
 		slog.Error("channel_monitor: load enabled monitors failed at startup", "error", err)
 		return
 	}
@@ -119,6 +126,23 @@ func (r *ChannelMonitorRunner) Start() {
 		r.Schedule(m)
 	}
 	slog.Info("channel_monitor: runner started", "scheduled_tasks", len(enabled))
+}
+
+// SyncFeatureState starts or pauses the runner according to the feature switch.
+// Pausing removes all ticker goroutines; re-enabling reloads enabled monitors.
+func (r *ChannelMonitorRunner) SyncFeatureState(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	enabled := true
+	if r.settingService != nil {
+		enabled = r.settingService.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelMonitor)
+	}
+	if enabled {
+		r.Start()
+		return
+	}
+	r.Pause()
 }
 
 // Schedule 为指定监控创建（或重置）独立定时任务。
@@ -143,7 +167,7 @@ func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 	}
 
 	r.mu.Lock()
-	if r.stopped {
+	if r.stopped || !r.active {
 		r.mu.Unlock()
 		return
 	}
@@ -174,6 +198,31 @@ func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 	go r.runScheduled(ctx, task)
 }
 
+// Pause cancels all scheduled monitor tickers without closing the worker pool.
+// Start can be called later to reload enabled monitors and resume scheduling.
+func (r *ChannelMonitorRunner) Pause() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.stopped || !r.active {
+		r.mu.Unlock()
+		return
+	}
+	r.active = false
+	tasks := make([]*scheduledMonitor, 0, len(r.tasks))
+	for _, task := range r.tasks {
+		tasks = append(tasks, task)
+	}
+	r.tasks = make(map[int64]*scheduledMonitor)
+	r.mu.Unlock()
+
+	for _, task := range tasks {
+		task.cancel()
+	}
+	r.wg.Wait()
+}
+
 // Unschedule 取消指定监控的定时任务（若存在）。
 // 已经在执行中的检测会通过 ctx 取消信号传递。
 func (r *ChannelMonitorRunner) Unschedule(id int64) {
@@ -202,6 +251,7 @@ func (r *ChannelMonitorRunner) Stop() {
 		return
 	}
 	r.stopped = true
+	r.active = false
 	r.parentCancel()
 	r.tasks = nil
 	r.mu.Unlock()
@@ -241,7 +291,7 @@ func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor)
 		return
 	}
 	if _, ok := r.pool.TrySubmit(func() {
-		r.runOne(task.id, task.name)
+		r.runOne(ctx, task.id, task.name)
 	}); !ok {
 		// 池满：丢弃本次检测，但必须释放已占用的 inFlight 槽，否则该 monitor 会被永久卡住。
 		r.releaseInFlight(task.id)
@@ -271,8 +321,11 @@ func (r *ChannelMonitorRunner) releaseInFlight(id int64) {
 
 // runOne 执行单个监控的检测。所有错误只记日志，不熔断。
 // 任务结束时（含 panic recover）必须释放 in-flight 槽。
-func (r *ChannelMonitorRunner) runOne(id int64, name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
+func (r *ChannelMonitorRunner) runOne(parentCtx context.Context, id int64, name string) {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, monitorRequestTimeout+monitorPingTimeout+monitorRunOneBuffer)
 	defer cancel()
 
 	defer r.releaseInFlight(id)

@@ -3,6 +3,7 @@ import lightbridgeRouter from './content/lightbridge-router.md?raw'
 import release029Preview1 from './content/release-0.2.9-preview.1.md?raw'
 import release0210Preview from './content/release-0.2.10-preview.md?raw'
 import release0213Preview from './content/release-0.2.13-preview.md?raw'
+import release0230 from './content/release-0.2.30.md?raw'
 import opsPublicPages from './content/ops-public-pages.md?raw'
 import opsUserCenter from './content/ops-user-center.md?raw'
 import opsUserPayment from './content/ops-user-payment.md?raw'
@@ -114,6 +115,13 @@ export const lightBridgeDocs: LightBridgeDoc[] = [
     group: '操作文档',
     description: '订阅管理、公告管理、兑换码管理、优惠码管理、风控管理功能说明',
     content: opsAdminDistribution,
+  },
+  {
+    id: 'release-0.2.30',
+    title: '0.2.30 版本更新',
+    group: '版本更新',
+    description: '模型目录、模块中心与渐进式模块架构正式版',
+    content: release0230,
   },
   {
     id: 'release-0.2.13-preview',

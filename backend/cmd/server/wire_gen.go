@@ -158,7 +158,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	openAITokenProvider := service.ProvideOpenAITokenProvider(accountRepository, geminiTokenCache, openAIOAuthService, oAuthRefreshAPI)
 	channelRepository := repository.NewChannelRepository(db)
 	channelService := service.NewChannelService(channelRepository, groupRepository, apiKeyAuthCacheInvalidator, pricingService)
-	modelCatalogService := service.NewModelCatalogService(modelCatalogRepository, accountRepository, groupRepository, channelService, channelMonitorService)
+	modelCatalogService := service.NewModelCatalogService(modelCatalogRepository, accountRepository, groupRepository, channelService, channelMonitorService, settingService)
 	modelPricingResolver := service.NewModelPricingResolver(channelService, billingService)
 	notificationEmailService := service.NewNotificationEmailService(settingRepository, emailService)
 	balanceNotifyService := service.ProvideBalanceNotifyService(emailService, settingRepository, accountRepository, notificationEmailService)
@@ -252,7 +252,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRequestTemplateHandler := admin.NewChannelMonitorRequestTemplateHandler(channelMonitorRequestTemplateService)
 	contentModerationRepository := repository.NewContentModerationRepository(db)
 	contentModerationHashCache := repository.NewContentModerationHashCache(redisClient)
-	contentModerationService := service.NewContentModerationService(settingRepository, contentModerationRepository, contentModerationHashCache, groupRepository, userRepository, apiKeyAuthCacheInvalidator, emailService)
+	contentModerationService := service.NewContentModerationService(settingRepository, contentModerationRepository, contentModerationHashCache, groupRepository, userRepository, apiKeyAuthCacheInvalidator, emailService, settingService)
 	contentModerationHandler := admin.NewContentModerationHandler(contentModerationService)
 	privacyFilterService := service.NewPrivacyFilterService(settingRepository, groupRepository)
 	privacyFilterHandler := admin.NewPrivacyFilterHandler(privacyFilterService)
@@ -301,10 +301,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	accountExpiryService := service.ProvideAccountExpiryService(accountRepository)
 	subscriptionExpiryService := service.ProvideSubscriptionExpiryService(userSubscriptionRepository, settingRepository, notificationEmailService)
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, configConfig)
-	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService)
+	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, settingService)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, userPlatformQuotaUsageFlusher, lightBridgeConnectSyncService, aistudioProxyManager)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, accountExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, contentModerationService, userPlatformQuotaUsageFlusher, lightBridgeConnectSyncService, aistudioProxyManager)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -358,6 +358,7 @@ func provideCleanup(
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
+	contentModerationService *service.ContentModerationService,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	lightBridgeConnectSync *service.LightBridgeConnectSyncService,
 	aistudioProxyManager *aistudio_proxy.Manager,
@@ -501,6 +502,12 @@ func provideCleanup(
 			{"ChannelMonitorRunner", func() error {
 				if channelMonitorRunner != nil {
 					channelMonitorRunner.Stop()
+				}
+				return nil
+			}},
+			{"ContentModerationService", func() error {
+				if contentModerationService != nil {
+					contentModerationService.Stop()
 				}
 				return nil
 			}},

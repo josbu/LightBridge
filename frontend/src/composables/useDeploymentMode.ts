@@ -8,10 +8,8 @@
  * 时，通过 `router.addRoute()` 动态注册这些路由，浏览器在导航到对应页面时才按需
  * 下载 chunk —— 即「在分发模式下再下载」。
  *
- * 因此本模块是「哪些功能属于分发」的唯一事实来源，被三处消费：
- *   1. `router/index.ts` —— 动态注册 / 注销分发路由（结构性移除的核心）。
- *   2. `components/layout/AppSidebar.vue` —— 菜单项可见性（通过 featureFlag）。
- *   3. `views/admin/SettingsView.vue` —— 模式切换开关。
+ * 本模块只负责解析部署模式；哪些页面 / 后台能力属于渐进式模块由
+ * `utils/progressiveFeatures.ts` 统一声明。
  *
  * 部署模式来自 public settings 的 `deployment_mode` 字段（同 backend_mode_enabled
  * 等机制）。缺省 / 未加载时回落到 distribution，保持向后兼容且避免菜单闪烁消失。
@@ -24,41 +22,6 @@ export const DEPLOYMENT_MODE_PERSONAL = 'personal'
 export const DEPLOYMENT_MODE_DISTRIBUTION = 'distribution'
 
 export type DeploymentMode = 'personal' | 'distribution'
-
-/**
- * 个人模式下被结构性移除的分发功能路由名（对应 router 中的 `name`）。
- * 用户明确要求移除的 5 类：公告、风控、兑换码、优惠码、订阅。
- */
-export const DISTRIBUTION_ROUTE_NAMES = [
-  // 公告
-  'AdminAnnouncements',
-  // 风控
-  'AdminRiskControl',
-  // 兑换码（管理端 + 用户端）
-  'AdminRedeem',
-  'Redeem',
-  // 优惠码
-  'AdminPromoCodes',
-  // 订阅（管理端 + 用户端）
-  'AdminSubscriptions',
-  'Subscriptions',
-] as const
-
-export type DistributionRouteName = (typeof DISTRIBUTION_ROUTE_NAMES)[number]
-
-/**
- * 个人模式下被隐藏的菜单/路由路径前缀。用于导航守卫兜底拦截（即便路由已注销，
- * 直接输入 URL 也会被重定向而非停在 404）。
- */
-export const DISTRIBUTION_PATH_PREFIXES = [
-  '/admin/announcements',
-  '/admin/risk-control',
-  '/admin/redeem',
-  '/admin/promo-codes',
-  '/admin/subscriptions',
-  '/redeem',
-  '/subscriptions',
-] as const
 
 /**
  * 从 public settings 解析当前部署模式（纯函数，可在非组件上下文调用，如 router 守卫）。
@@ -77,13 +40,6 @@ export function isPersonalModeNow(): boolean {
 
 export function isDistributionModeNow(): boolean {
   return resolveDeploymentMode() === DEPLOYMENT_MODE_DISTRIBUTION
-}
-
-/** 判断某路径是否属于分发功能（个人模式下应被移除）。 */
-export function isDistributionPath(path: string): boolean {
-  return DISTRIBUTION_PATH_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(prefix + '/'),
-  )
 }
 
 /**

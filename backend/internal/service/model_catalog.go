@@ -62,6 +62,7 @@ type ModelCatalogService struct {
 	groupRepo       GroupRepository
 	channelService  *ChannelService
 	monitorService  *ChannelMonitorService
+	settingService  *SettingService
 }
 
 func NewModelCatalogService(
@@ -70,6 +71,7 @@ func NewModelCatalogService(
 	groupRepo GroupRepository,
 	channelService *ChannelService,
 	monitorService *ChannelMonitorService,
+	settingService *SettingService,
 ) *ModelCatalogService {
 	return &ModelCatalogService{
 		repo:           repo,
@@ -77,6 +79,7 @@ func NewModelCatalogService(
 		groupRepo:      groupRepo,
 		channelService: channelService,
 		monitorService: monitorService,
+		settingService: settingService,
 	}
 }
 
@@ -553,6 +556,9 @@ func mergeMinMax(minPtr, maxPtr, value *float64) (*float64, *float64) {
 // 失败时仅 log warning，不阻断目录渲染。
 func (s *ModelCatalogService) enrichMonitorStatus(ctx context.Context, models []ModelCatalogModel) {
 	if s == nil || s.monitorService == nil || s.monitorService.repo == nil || len(models) == 0 {
+		return
+	}
+	if s.settingService != nil && !s.settingService.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelMonitor) {
 		return
 	}
 

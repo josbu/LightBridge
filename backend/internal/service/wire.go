@@ -605,10 +605,16 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 	return svc
 }
 
-// ProvidePaymentOrderExpiryService creates and starts PaymentOrderExpiryService.
-func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService) *PaymentOrderExpiryService {
-	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
-	svc.Start()
+// ProvidePaymentOrderExpiryService creates PaymentOrderExpiryService and runs it
+// only while the payment feature is enabled.
+func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, settingService *SettingService) *PaymentOrderExpiryService {
+	svc := NewPaymentOrderExpiryService(paymentSvc, settingService, 60*time.Second)
+	if settingService != nil {
+		settingService.AddOnUpdateCallback(func() {
+			svc.SyncFeatureState(context.Background())
+		})
+	}
+	svc.SyncFeatureState(context.Background())
 	return svc
 }
 
@@ -621,20 +627,21 @@ func ProvideChannelMonitorService(
 	return NewChannelMonitorService(repo, encryptor)
 }
 
-// ProvideChannelMonitorRunner 创建并启动渠道监控调度器。
-// 通过 SetScheduler 注入回 service 后再 Start，确保启动时加载所有 enabled monitor，
-// 后续 CRUD 也能即时同步任务表。Runner.Stop 由 cleanup function 调用。
-// settingService 用于 runner 每次 fire 读取功能开关。
-// 功能禁用时不创建 runner，实现真正的渐进式加载。
+// ProvideChannelMonitorRunner 创建渠道监控调度器。
+// 通过 SetScheduler 注入回 service；功能关闭时 runner 保持无任务、无 ticker，
+// 功能打开时通过 settings callback 加载 enabled monitors。Runner.Stop 由 cleanup 调用。
 func ProvideChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService) *ChannelMonitorRunner {
-	// 检查功能是否启用，禁用时不创建 runner
-	if settingService != nil && !settingService.IsChannelMonitorEnabled(context.Background()) {
-		slog.Info("channel_monitor: feature disabled, runner not started")
-		return nil
-	}
 	r := NewChannelMonitorRunner(svc, settingService)
 	svc.SetScheduler(r)
-	r.Start()
+	if settingService != nil {
+		settingService.AddOnUpdateCallback(func() {
+			r.SyncFeatureState(context.Background())
+		})
+	}
+	r.SyncFeatureState(context.Background())
+	if !r.active {
+		slog.Info("channel_monitor: feature disabled, runner paused")
+	}
 	return r
 }
 

@@ -9771,8 +9771,8 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		mapping := acc.GetModelMapping()
 		if len(mapping) > 0 {
 			hasAnyMapping = true
-			for model, mapped := range mapping {
-				if model == mapped && !strings.Contains(model, "*") {
+			for model := range mapping {
+				if !strings.Contains(model, "*") {
 					modelSet[model] = struct{}{}
 				}
 			}

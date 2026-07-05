@@ -546,6 +546,9 @@ func TestOpenAISelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) 
 				Platform:    PlatformOpenAI,
 				Status:      StatusActive,
 				Schedulable: true,
+				Extra: map[string]any{
+					AccountExtraKeyRestrictToModelList: true,
+				},
 				Credentials: map[string]any{"model_mapping": map[string]any{"gpt-3.5-turbo": "gpt-3.5-turbo"}},
 			},
 		},

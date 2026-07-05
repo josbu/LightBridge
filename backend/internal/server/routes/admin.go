@@ -4,6 +4,7 @@ package routes
 import (
 	"github.com/WilliamWang1721/LightBridge/internal/handler"
 	"github.com/WilliamWang1721/LightBridge/internal/server/middleware"
+	"github.com/WilliamWang1721/LightBridge/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,6 +14,7 @@ func RegisterAdminRoutes(
 	v1 *gin.RouterGroup,
 	h *handler.Handlers,
 	adminAuth middleware.AdminAuthMiddleware,
+	settingService *service.SettingService,
 ) {
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
@@ -30,7 +32,7 @@ func RegisterAdminRoutes(
 		registerAccountRoutes(admin, h)
 
 		// 公告管理
-		registerAnnouncementRoutes(admin, h)
+		registerAnnouncementRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureAnnouncements), h)
 
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(admin, h)
@@ -45,14 +47,15 @@ func RegisterAdminRoutes(
 		registerAistudioProxyRoutes(admin, h)
 
 		// 代理管理
-		registerProxyRoutes(admin, h)
-		registerProxyModuleRoutes(admin, h)
+		proxies := progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureProxies)
+		registerProxyRoutes(proxies, h)
+		registerProxyModuleRoutes(proxies, h)
 
 		// 卡密管理
-		registerRedeemCodeRoutes(admin, h)
+		registerRedeemCodeRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureRedeem), h)
 
 		// 优惠码管理
-		registerPromoCodeRoutes(admin, h)
+		registerPromoCodeRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeaturePromo), h)
 
 		// 系统设置
 		registerSettingsRoutes(admin, h)
@@ -70,7 +73,7 @@ func RegisterAdminRoutes(
 		registerSystemRoutes(admin, h)
 
 		// 订阅管理
-		registerSubscriptionRoutes(admin, h)
+		registerSubscriptionRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureSubscriptions), h)
 
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
@@ -91,27 +94,33 @@ func RegisterAdminRoutes(
 		registerScheduledTestRoutes(admin, h)
 
 		// 渠道管理
-		registerChannelRoutes(admin, h)
+		registerChannelRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureChannelPricing), h)
 
 		// 模型目录 / 模型广场
 		registerModelCatalogRoutes(admin, h)
 
 		// 渠道监控
-		registerChannelMonitorRoutes(admin, h)
+		registerChannelMonitorRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureChannelMonitor), h)
 
 		// 风控中心
-		registerContentModerationRoutes(admin, h)
+		registerContentModerationRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureRiskControl), h)
 
 		// 隐私过滤
-		registerPrivacyFilterRoutes(admin, h)
+		registerPrivacyFilterRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeaturePrivacyFilter), h)
 
 		// 邀请返利（专属用户管理）
-		registerAffiliateRoutes(admin, h)
+		registerAffiliateRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureAffiliate), h)
 
 		registerAdminModuleRoutes(admin, h)
 
 		registerUIThemeRoutes(admin, h)
 	}
+}
+
+func progressiveAdminGroup(admin *gin.RouterGroup, settingService *service.SettingService, feature service.ProgressiveFeature) *gin.RouterGroup {
+	group := admin.Group("")
+	group.Use(middleware.RequireProgressiveFeature(settingService, feature))
+	return group
 }
 
 func registerModelCatalogRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

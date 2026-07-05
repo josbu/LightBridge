@@ -306,7 +306,7 @@ import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } 
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
-import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { makeProgressiveSidebarFlag, ProgressiveFeatures } from '@/utils/progressiveFeatures'
 
 interface NavItem {
   path: string
@@ -336,7 +336,9 @@ function applyFeatureFlags(items: NavItem[]): NavItem[] {
   for (const item of items) {
     if (item.featureFlag && item.featureFlag() === false) continue
     if (item.children) {
-      out.push({ ...item, children: applyFeatureFlags(item.children) })
+      const children = applyFeatureFlags(item.children)
+      if (item.expandOnly && children.length === 0) continue
+      out.push({ ...item, children })
     } else {
       out.push(item)
     }
@@ -810,22 +812,21 @@ const FeedbackIcon = {
     )
 }
 
-// Public-settings flags go through the registry in utils/featureFlags.ts,
-// which handles the opt-in vs opt-out fallback when settings haven't loaded
-// yet. Admin-only flags (not in public settings) stay inline below.
-const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
-const flagPayment = makeSidebarFlag(FeatureFlags.payment)
-const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
-const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
-const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
-const flagPrivacyFilter = makeSidebarFlag(FeatureFlags.privacyFilter)
-const flagAnnouncements = makeSidebarFlag(FeatureFlags.announcements)
-const flagRedeem = makeSidebarFlag(FeatureFlags.redeem)
-const flagPromo = makeSidebarFlag(FeatureFlags.promo)
-const flagProxies = makeSidebarFlag(FeatureFlags.proxies)
-const flagChannelPricing = makeSidebarFlag(FeatureFlags.channelPricing)
+// Progressive module flags go through utils/progressiveFeatures.ts, the same
+// registry used by dynamic route registration.
+const flagChannelMonitor = makeProgressiveSidebarFlag(ProgressiveFeatures.channelMonitor)
+const flagPayment = makeProgressiveSidebarFlag(ProgressiveFeatures.payment)
+const flagAvailableChannels = makeProgressiveSidebarFlag(ProgressiveFeatures.availableChannels)
+const flagAffiliate = makeProgressiveSidebarFlag(ProgressiveFeatures.affiliate)
+const flagRiskControl = makeProgressiveSidebarFlag(ProgressiveFeatures.riskControl)
+const flagPrivacyFilter = makeProgressiveSidebarFlag(ProgressiveFeatures.privacyFilter)
+const flagAnnouncements = makeProgressiveSidebarFlag(ProgressiveFeatures.announcements)
+const flagRedeem = makeProgressiveSidebarFlag(ProgressiveFeatures.redeem)
+const flagPromo = makeProgressiveSidebarFlag(ProgressiveFeatures.promo)
+const flagProxies = makeProgressiveSidebarFlag(ProgressiveFeatures.proxies)
+const flagChannelPricing = makeProgressiveSidebarFlag(ProgressiveFeatures.channelPricing)
+const flagSubscriptions = makeProgressiveSidebarFlag(ProgressiveFeatures.subscriptions)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
-const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 
 // anyFlags：任一子开关「非 false」即显示（用于分组：只要有一个子项启用，分组就显示）
 function anyFlags(...flags: Array<() => boolean | undefined>): () => boolean {
@@ -862,7 +863,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     expandOnly: true,
     children: [
       { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
-      { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+      { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscriptions },
       { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
       { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
       { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagRedeem },
@@ -982,10 +983,10 @@ const adminNavItems = computed((): NavItem[] => {
       expandOnly: true,
       hideInSimpleMode: true,
       children: [
-        { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon },
-        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, featureFlag: flagAdminPayment },
-        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, featureFlag: flagAdminPayment },
-        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, featureFlag: flagAdminPayment },
+        { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, featureFlag: flagSubscriptions },
+        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, featureFlag: flagPayment },
+        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, featureFlag: flagPayment },
+        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, featureFlag: flagPayment },
       ],
     },
 

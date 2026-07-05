@@ -499,6 +499,12 @@ type ContentModerationService struct {
 	lastCleanupUnix          atomic.Int64
 	lastCleanupDeletedHit    atomic.Int64
 	lastCleanupDeletedNonHit atomic.Int64
+	featureEnabled           atomic.Bool
+	featureStateReady        atomic.Bool
+	lifecycleMu              sync.Mutex
+	lifecycleCancel          context.CancelFunc
+	lifecycleRunning         bool
+	lifecycleWG              sync.WaitGroup
 	keyHealthMu              sync.Mutex
 	keyHealth                map[string]*contentModerationKeyHealth
 }
@@ -540,7 +546,12 @@ func NewContentModerationService(
 	userRepo UserRepository,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	emailService *EmailService,
+	settingServices ...*SettingService,
 ) *ContentModerationService {
+	var settingService *SettingService
+	if len(settingServices) > 0 {
+		settingService = settingServices[0]
+	}
 	svc := &ContentModerationService{
 		settingRepo:          settingRepo,
 		repo:                 repo,
@@ -555,12 +566,69 @@ func NewContentModerationService(
 		keyHealth:            make(map[string]*contentModerationKeyHealth),
 	}
 	if settingRepo != nil && repo != nil {
-		for i := 0; i < svc.workerCount; i++ {
-			go svc.worker(i)
+		if settingService != nil {
+			settingService.AddOnUpdateCallback(func() {
+				svc.SyncFeatureState(context.Background())
+			})
 		}
-		go svc.cleanupWorker()
+		svc.SyncFeatureState(context.Background())
 	}
 	return svc
+}
+
+func (s *ContentModerationService) SyncFeatureState(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	enabled := s.readRiskControlEnabled(ctx)
+	s.featureEnabled.Store(enabled)
+	s.featureStateReady.Store(true)
+	if enabled {
+		s.Start()
+		return
+	}
+	s.Stop()
+}
+
+func (s *ContentModerationService) Start() {
+	if s == nil || s.settingRepo == nil || s.repo == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleRunning {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.lifecycleCancel = cancel
+	s.lifecycleRunning = true
+	for i := 0; i < s.workerCount; i++ {
+		s.lifecycleWG.Add(1)
+		go s.worker(ctx, i)
+	}
+	s.lifecycleWG.Add(1)
+	go s.cleanupWorker(ctx)
+	s.lifecycleMu.Unlock()
+}
+
+func (s *ContentModerationService) Stop() {
+	if s == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	if !s.lifecycleRunning {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	cancel := s.lifecycleCancel
+	s.lifecycleCancel = nil
+	s.lifecycleRunning = false
+	s.lifecycleMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	s.lifecycleWG.Wait()
 }
 
 func (s *ContentModerationService) GetConfig(ctx context.Context) (*ContentModerationConfigView, error) {
@@ -1158,13 +1226,21 @@ func (s *ContentModerationService) enqueueRecord(input ContentModerationCheckInp
 	}
 }
 
-func (s *ContentModerationService) worker(id int) {
+func (s *ContentModerationService) worker(parentCtx context.Context, id int) {
+	defer s.lifecycleWG.Done()
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
+		select {
+		case <-parentCtx.Done():
+			return
+		default:
+		}
+		ctx, cancel := context.WithTimeout(parentCtx, maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
 		cfg, err := s.loadConfig(ctx)
 		if err != nil || id >= cfg.WorkerCount {
 			cancel()
-			time.Sleep(time.Second)
+			if !sleepUntilDone(parentCtx, time.Second) {
+				return
+			}
 			continue
 		}
 		task, ok := s.dequeueAsyncTask(ctx, time.Second)
@@ -1227,6 +1303,17 @@ func (s *ContentModerationService) dequeueAsyncTask(ctx context.Context, idleWai
 		return zero, false
 	case <-timer.C:
 		return zero, false
+	}
+}
+
+func sleepUntilDone(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -1383,11 +1470,16 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 	}, nil
 }
 
-func (s *ContentModerationService) cleanupWorker() {
+func (s *ContentModerationService) cleanupWorker(ctx context.Context) {
+	defer s.lifecycleWG.Done()
 	timer := time.NewTimer(contentModerationCleanupDelay)
 	defer timer.Stop()
 	for {
-		<-timer.C
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
 		s.runCleanupOnce()
 		timer.Reset(contentModerationCleanupInterval)
 	}
@@ -1442,6 +1534,16 @@ func (s *ContentModerationService) loadConfig(ctx context.Context) (*ContentMode
 }
 
 func (s *ContentModerationService) isRiskControlEnabled(ctx context.Context) bool {
+	if s != nil && s.featureStateReady.Load() {
+		return s.featureEnabled.Load()
+	}
+	return s.readRiskControlEnabled(ctx)
+}
+
+func (s *ContentModerationService) readRiskControlEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyRiskControlEnabled)
 	if err != nil {
 		return false

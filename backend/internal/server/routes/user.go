@@ -25,8 +25,12 @@ func RegisterUserRoutes(
 			user.GET("/profile", h.User.GetProfile)
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)
-			user.GET("/aff", h.User.GetAffiliate)
-			user.POST("/aff/transfer", h.User.TransferAffiliateQuota)
+			affiliate := user.Group("/aff")
+			affiliate.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureAffiliate))
+			{
+				affiliate.GET("", h.User.GetAffiliate)
+				affiliate.POST("/transfer", h.User.TransferAffiliateQuota)
+			}
 			user.POST("/account-bindings/email/send-code", h.User.SendEmailBindingCode)
 			user.POST("/account-bindings/email", h.User.BindEmailIdentity)
 			user.DELETE("/account-bindings/:provider", h.User.UnbindIdentity)
@@ -74,6 +78,7 @@ func RegisterUserRoutes(
 
 		// 用户可用渠道（非管理员接口）
 		channels := authenticated.Group("/channels")
+		channels.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureAvailableChannels))
 		{
 			channels.GET("/available", h.AvailableChannel.List)
 		}
@@ -99,6 +104,7 @@ func RegisterUserRoutes(
 
 		// 公告（用户可见）
 		announcements := authenticated.Group("/announcements")
+		announcements.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureAnnouncements))
 		{
 			announcements.GET("", h.Announcement.List)
 			announcements.POST("/:id/read", h.Announcement.MarkRead)
@@ -106,6 +112,7 @@ func RegisterUserRoutes(
 
 		// 卡密兑换
 		redeem := authenticated.Group("/redeem")
+		redeem.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureRedeem))
 		{
 			redeem.POST("", h.Redeem.Redeem)
 			redeem.GET("/history", h.Redeem.GetHistory)
@@ -113,6 +120,7 @@ func RegisterUserRoutes(
 
 		// 用户订阅
 		subscriptions := authenticated.Group("/subscriptions")
+		subscriptions.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureSubscriptions))
 		{
 			subscriptions.GET("", h.Subscription.List)
 			subscriptions.GET("/active", h.Subscription.GetActive)
@@ -122,6 +130,7 @@ func RegisterUserRoutes(
 
 		// 渠道监控（用户只读）
 		monitors := authenticated.Group("/channel-monitors")
+		monitors.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureChannelMonitor))
 		{
 			monitors.GET("", h.ChannelMonitor.List)
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)

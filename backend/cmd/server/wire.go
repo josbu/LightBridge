@@ -98,6 +98,7 @@ func provideCleanup(
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
+	contentModerationService *service.ContentModerationService,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	lightBridgeConnectSync *service.LightBridgeConnectSyncService,
 	aistudioProxyManager *aistudio_proxy.Manager,
@@ -242,6 +243,12 @@ func provideCleanup(
 			{"ChannelMonitorRunner", func() error {
 				if channelMonitorRunner != nil {
 					channelMonitorRunner.Stop()
+				}
+				return nil
+			}},
+			{"ContentModerationService", func() error {
+				if contentModerationService != nil {
+					contentModerationService.Stop()
 				}
 				return nil
 			}},

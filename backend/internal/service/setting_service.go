@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -178,7 +179,8 @@ type SettingService struct {
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config
-	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
+	onUpdateMu                  sync.RWMutex
+	onUpdateCallbacks           []func() // Callbacks when settings are updated (cache invalidation, progressive workers)
 	version                     string // Application version
 	webSearchManagerBuilder     WebSearchManagerBuilder
 	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
@@ -937,18 +939,14 @@ func (s *SettingService) GetChannelMonitorRuntime(ctx context.Context) ChannelMo
 		return ChannelMonitorRuntime{Enabled: true, DefaultIntervalSeconds: channelMonitorIntervalFallback}
 	}
 	return ChannelMonitorRuntime{
-		Enabled:                !isFalseSettingValue(vals[SettingKeyChannelMonitorEnabled]),
+		Enabled:                s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelMonitor),
 		DefaultIntervalSeconds: parseChannelMonitorInterval(vals[SettingKeyChannelMonitorDefaultIntervalSeconds]),
 	}
 }
 
 // IsChannelMonitorEnabled 检查渠道监控功能是否启用（用于渐进式加载决策）
 func (s *SettingService) IsChannelMonitorEnabled(ctx context.Context) bool {
-	val, err := s.settingRepo.GetValue(ctx, SettingKeyChannelMonitorEnabled)
-	if err != nil {
-		return true // 默认启用
-	}
-	return val != "false"
+	return s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelMonitor)
 }
 
 // AvailableChannelsRuntime is the lightweight view of the available-channels feature
@@ -961,12 +959,8 @@ type AvailableChannelsRuntime struct {
 // from the settings store. Fail-closed: on error returns Enabled=false, matching
 // the opt-in default (unknown ↔ disabled).
 func (s *SettingService) GetAvailableChannelsRuntime(ctx context.Context) AvailableChannelsRuntime {
-	vals, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyAvailableChannelsEnabled})
-	if err != nil {
-		return AvailableChannelsRuntime{Enabled: false}
-	}
 	return AvailableChannelsRuntime{
-		Enabled: vals[SettingKeyAvailableChannelsEnabled] == "true",
+		Enabled: s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureAvailableChannels),
 	}
 }
 
@@ -1116,10 +1110,41 @@ func (s *SettingService) IsOpenAIAllowClaudeCodeCodexPluginEnabled(ctx context.C
 	return false
 }
 
-// SetOnUpdateCallback sets a callback function to be called when settings are updated
-// This is used for cache invalidation (e.g., HTML cache in frontend server)
+// SetOnUpdateCallback replaces callbacks invoked when settings are updated.
+// This is kept for compatibility with older callers; new code should prefer
+// AddOnUpdateCallback so independent subsystems do not overwrite each other.
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
-	s.onUpdate = callback
+	if s == nil {
+		return
+	}
+	s.onUpdateMu.Lock()
+	defer s.onUpdateMu.Unlock()
+	s.onUpdateCallbacks = nil
+	if callback != nil {
+		s.onUpdateCallbacks = append(s.onUpdateCallbacks, callback)
+	}
+}
+
+// AddOnUpdateCallback registers an additional settings update callback.
+func (s *SettingService) AddOnUpdateCallback(callback func()) {
+	if s == nil || callback == nil {
+		return
+	}
+	s.onUpdateMu.Lock()
+	defer s.onUpdateMu.Unlock()
+	s.onUpdateCallbacks = append(s.onUpdateCallbacks, callback)
+}
+
+func (s *SettingService) runOnUpdateCallbacks() {
+	if s == nil {
+		return
+	}
+	s.onUpdateMu.RLock()
+	callbacks := append([]func(){}, s.onUpdateCallbacks...)
+	s.onUpdateMu.RUnlock()
+	for _, callback := range callbacks {
+		callback()
+	}
 }
 
 // SetVersion sets the application version for injection into public settings
@@ -2112,9 +2137,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		value:     settings.OpenAIAllowClaudeCodeCodexPlugin,
 		expiresAt: time.Now().Add(openAIAllowCodexPluginCacheTTL).UnixNano(),
 	})
-	if s.onUpdate != nil {
-		s.onUpdate() // Invalidate cache after settings update
-	}
+	s.runOnUpdateCallbacks()
 }
 
 func (s *SettingService) defaultRewriteMessageCacheControl() bool {
@@ -2391,11 +2414,7 @@ func (s *SettingService) GetRegistrationEmailSuffixWhitelist(ctx context.Context
 
 // IsPromoCodeEnabled 检查是否启用优惠码功能
 func (s *SettingService) IsPromoCodeEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyPromoCodeEnabled)
-	if err != nil {
-		return true // 默认启用
-	}
-	return value != "false"
+	return s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePromo)
 }
 
 // IsInvitationCodeEnabled 检查是否启用邀请码注册功能
@@ -2418,11 +2437,7 @@ func (s *SettingService) GetCustomMenuItemsRaw(ctx context.Context) string {
 
 // IsAffiliateEnabled 检查是否启用邀请返利功能（总开关）
 func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
-	value, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateEnabled)
-	if err != nil {
-		return false // 默认关闭
-	}
-	return value == "true"
+	return s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureAffiliate)
 }
 
 // GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。

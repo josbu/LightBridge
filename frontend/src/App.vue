@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import { resolveDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
-import { syncDistributionRoutes } from '@/router'
-import { useDeploymentMode, isDistributionModeNow } from '@/composables/useDeploymentMode'
+import { syncProgressiveRoutes } from '@/router'
+import {
+  isProgressiveFeatureEnabled,
+  isProgressivePathDisabled,
+  ProgressiveFeatures,
+} from '@/utils/progressiveFeatures'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,14 +20,26 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
-const { isDistributionMode } = useDeploymentMode()
+const subscriptionsFeatureEnabled = computed(() =>
+  isProgressiveFeatureEnabled(ProgressiveFeatures.subscriptions),
+)
+const announcementsFeatureEnabled = computed(() =>
+  isProgressiveFeatureEnabled(ProgressiveFeatures.announcements),
+)
+let visibilityListenerRegistered = false
 
-// 运行时切换部署模式：管理员在设置页改动 deployment_mode 并刷新 public settings 后，
-// 这里据新值动态注册 / 注销分发路由（分发模式按需下载 chunk，个人模式结构性移除）。
+function redirectDisabledProgressiveRoute() {
+  if (!isProgressivePathDisabled(route.path)) return
+  router.replace(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+}
+
+// Runtime module toggles: after public settings changes, add/remove progressive
+// routes from the matcher and leave disabled pages immediately.
 watch(
-  () => appStore.cachedPublicSettings?.deployment_mode,
+  () => appStore.cachedPublicSettings,
   () => {
-    syncDistributionRoutes(isDistributionModeNow())
+    syncProgressiveRoutes()
+    redirectDisabledProgressiveRoute()
   },
 )
 
@@ -56,40 +72,54 @@ watch(
 
 // Watch for authentication state and manage subscription data + announcements
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible' && authStore.isAuthenticated) {
+  if (
+    document.visibilityState === 'visible' &&
+    authStore.isAuthenticated &&
+    announcementsFeatureEnabled.value
+  ) {
     announcementStore.fetchAnnouncements()
   }
 }
 
 watch(
-  () => authStore.isAuthenticated,
-  (isAuthenticated, oldValue) => {
-    if (isAuthenticated) {
-      // 订阅与公告均属分发功能：个人模式下不预载、不轮询、不拉取。
-      if (isDistributionModeNow()) {
-        // User logged in: preload subscriptions and start polling
-        subscriptionStore.fetchActiveSubscriptions().catch((error) => {
-          console.error('Failed to preload subscriptions:', error)
-        })
-        subscriptionStore.startPolling()
-
-        // Announcements: new login vs page refresh restore
-        if (oldValue === false) {
-          // New login: delay 3s then force fetch
-          setTimeout(() => announcementStore.fetchAnnouncements(true), 3000)
-        } else {
-          // Page refresh restore (oldValue was undefined)
-          announcementStore.fetchAnnouncements()
-        }
-
-        // Register visibility change listener
-        document.addEventListener('visibilitychange', onVisibilityChange)
-      }
-    } else {
-      // User logged out: clear data and stop polling
+  [
+    () => authStore.isAuthenticated,
+    () => subscriptionsFeatureEnabled.value,
+    () => announcementsFeatureEnabled.value,
+  ],
+  ([isAuthenticated, subscriptionsEnabled, announcementsEnabled], oldValues) => {
+    const oldAuthenticated = oldValues?.[0]
+    if (!isAuthenticated || !subscriptionsEnabled) {
       subscriptionStore.clear()
+    } else {
+      subscriptionStore.fetchActiveSubscriptions().catch((error) => {
+        console.error('Failed to preload subscriptions:', error)
+      })
+      subscriptionStore.startPolling()
+    }
+
+    if (!isAuthenticated || !announcementsEnabled) {
       announcementStore.reset()
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      if (visibilityListenerRegistered) {
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+        visibilityListenerRegistered = false
+      }
+      return
+    }
+
+    if (oldAuthenticated === false) {
+      setTimeout(() => {
+        if (authStore.isAuthenticated && announcementsFeatureEnabled.value) {
+          announcementStore.fetchAnnouncements(true)
+        }
+      }, 3000)
+    } else {
+      announcementStore.fetchAnnouncements()
+    }
+
+    if (!visibilityListenerRegistered) {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+      visibilityListenerRegistered = true
     }
   },
   { immediate: true }
@@ -97,13 +127,16 @@ watch(
 
 // Route change trigger (throttled by store)
 router.afterEach(() => {
-  if (authStore.isAuthenticated && isDistributionModeNow()) {
+  if (authStore.isAuthenticated && announcementsFeatureEnabled.value) {
     announcementStore.fetchAnnouncements()
   }
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', onVisibilityChange)
+  if (visibilityListenerRegistered) {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    visibilityListenerRegistered = false
+  }
 })
 
 onMounted(async () => {
@@ -122,8 +155,9 @@ onMounted(async () => {
   await appStore.fetchPublicSettings()
 
   // SSR 注入缺失时，public settings 通过异步接口才到位；此处依据最新值再同步一次
-  // 分发路由的注册状态（与 main.ts 的同步互补，确保两条通道都被覆盖）。
-  syncDistributionRoutes(isDistributionModeNow())
+  // 渐进式路由的注册状态（与 main.ts 的同步互补，确保两条通道都被覆盖）。
+  syncProgressiveRoutes()
+  redirectDisabledProgressiveRoute()
 
   // Re-resolve document title now that siteName is available
   document.title = resolveDocumentTitle(route.meta.title, appStore.siteName, route.meta.titleKey as string)
@@ -134,6 +168,5 @@ onMounted(async () => {
   <NavigationProgress />
   <RouterView />
   <Toast />
-  <!-- 公告弹窗属分发功能：个人模式下不挂载 -->
-  <AnnouncementPopup v-if="isDistributionMode" />
+  <AnnouncementPopup v-if="announcementsFeatureEnabled" />
 </template>

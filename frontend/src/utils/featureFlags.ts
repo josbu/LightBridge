@@ -27,7 +27,7 @@
  *
  *   - **`opt-out`** (default enabled) — menu visible when settings unloaded,
  *     hidden only when the backend explicitly sends `false`. Use for features
- *     that ship enabled by default (Channel Monitor, Payment).
+ *     that ship enabled by default (Channel Monitor).
  *   - **`opt-in`**  (default disabled) — menu hidden when settings unloaded,
  *     visible only when the backend explicitly sends `true`. Use for features
  *     that ship disabled (Available Channels).
@@ -52,7 +52,7 @@
  *   8. Frontend `api/admin/settings.ts`        → admin DTO typings
  *   9. **Frontend `utils/featureFlags.ts` (this file)** → register via `defineFlag`
  *  10. Frontend `views/admin/SettingsView.vue` → Toggle UI + form defaults + save payload
- *  11. Frontend `components/layout/AppSidebar.vue` → attach via `makeSidebarFlag`
+ *  11. Frontend `utils/progressiveFeatures.ts` → attach routes/sidebar/runtime behavior
  *
  * ## Usage
  *
@@ -106,7 +106,7 @@ export const FeatureFlags = {
   }),
   payment: defineFlag({
     key: 'payment_enabled',
-    mode: 'opt-out',
+    mode: 'opt-in',
     label: 'Payment',
   }),
   riskControl: defineFlag({

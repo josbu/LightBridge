@@ -1262,6 +1262,9 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoModelSupport(t *test
 				Priority:    1,
 				Status:      StatusActive,
 				Schedulable: true,
+				Extra: map[string]any{
+					AccountExtraKeyRestrictToModelList: true,
+				},
 				Credentials: map[string]any{"model_mapping": map[string]any{"claude-3-5-haiku-20241022": "claude-3-5-haiku-20241022"}},
 			},
 		},

@@ -33,6 +33,9 @@ func TestCollectSelectionFailureStats(t *testing.T) {
 			Platform:    PlatformAntigravity,
 			Status:      StatusActive,
 			Schedulable: true,
+			Extra: map[string]any{
+				AccountExtraKeyRestrictToModelList: true,
+			},
 		},
 		// model unsupported
 		{
@@ -40,6 +43,9 @@ func TestCollectSelectionFailureStats(t *testing.T) {
 			Platform:    PlatformOpenAI,
 			Status:      StatusActive,
 			Schedulable: true,
+			Extra: map[string]any{
+				AccountExtraKeyRestrictToModelList: true,
+			},
 			Credentials: map[string]any{
 				"model_mapping": map[string]any{
 					"gpt-image": "gpt-image",

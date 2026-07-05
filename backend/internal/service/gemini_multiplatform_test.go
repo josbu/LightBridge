@@ -695,6 +695,9 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_NoModel
 				Priority:    1,
 				Status:      StatusActive,
 				Schedulable: true,
+				Extra: map[string]any{
+					AccountExtraKeyRestrictToModelList: true,
+				},
 				Credentials: map[string]any{"model_mapping": map[string]any{"gemini-1.0-pro": "gemini-1.0-pro"}},
 			},
 		},

@@ -12,9 +12,69 @@ vi.mock('@/api/auth', () => ({
   getPublicSettings: vi.fn(),
 }))
 
+function createPublicSettings(overrides: Record<string, unknown> = {}) {
+  return {
+    registration_enabled: false,
+    email_verify_enabled: false,
+    force_email_on_third_party_signup: false,
+    registration_email_suffix_whitelist: [],
+    promo_code_enabled: true,
+    password_reset_enabled: false,
+    invitation_code_enabled: false,
+    turnstile_enabled: false,
+    turnstile_site_key: '',
+    site_name: 'LightBridge',
+    site_logo: '',
+    site_subtitle: '',
+    api_base_url: '',
+    contact_info: '',
+    doc_url: '',
+    home_content: '',
+    hide_ccs_import_button: false,
+    payment_enabled: false,
+    risk_control_enabled: false,
+    privacy_filter_enabled: false,
+    table_default_page_size: 20,
+    table_page_size_options: [10, 20, 50, 100],
+    custom_menu_items: [],
+    custom_endpoints: [],
+    linuxdo_oauth_enabled: false,
+    wechat_oauth_enabled: false,
+    oidc_oauth_enabled: false,
+    oidc_oauth_provider_name: 'OIDC',
+    github_oauth_enabled: false,
+    google_oauth_enabled: false,
+    backend_mode_enabled: false,
+    version: '1.0.0',
+    balance_low_notify_enabled: false,
+    account_quota_notify_enabled: false,
+    balance_low_notify_threshold: 0,
+    channel_monitor_enabled: true,
+    channel_monitor_default_interval_seconds: 60,
+    available_channels_enabled: false,
+    affiliate_enabled: false,
+    announcements_enabled: true,
+    redeem_enabled: true,
+    promo_enabled: true,
+    proxies_enabled: true,
+    channel_pricing_enabled: true,
+    deployment_mode: 'distribution',
+    ...overrides,
+  } as any
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 describe('useAppStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.clearAllMocks()
     vi.useFakeTimers()
     localStorage.clear()
     // 清除 window.__APP_CONFIG__
@@ -331,6 +391,47 @@ describe('useAppStore', () => {
       expect((window as any).__APP_CONFIG__.table_page_size_options).toEqual([20, 100, 1000])
       expect(localStorage.getItem('table-page-size')).toBeNull()
       expect(localStorage.getItem('table-page-size-source')).toBeNull()
+    })
+
+    it('patchPublicSettings 会乐观合并缓存与运行时注入配置', () => {
+      const store = useAppStore()
+      ;(window as any).__APP_CONFIG__ = createPublicSettings({ redeem_enabled: false })
+      store.initFromInjectedConfig()
+
+      const patched = store.patchPublicSettings({ redeem_enabled: true })
+
+      expect(patched?.redeem_enabled).toBe(true)
+      expect(store.cachedPublicSettings?.redeem_enabled).toBe(true)
+      expect((window as any).__APP_CONFIG__.redeem_enabled).toBe(true)
+    })
+
+    it('强制刷新不会被进行中的旧请求吞掉，也不会让旧结果覆盖乐观开关', async () => {
+      const stale = deferred<ReturnType<typeof createPublicSettings>>()
+      const fresh = deferred<ReturnType<typeof createPublicSettings>>()
+      vi.mocked(getPublicSettings)
+        .mockReturnValueOnce(stale.promise)
+        .mockReturnValueOnce(fresh.promise)
+
+      const store = useAppStore()
+      ;(window as any).__APP_CONFIG__ = createPublicSettings({ redeem_enabled: false })
+      store.initFromInjectedConfig()
+
+      const firstRequest = store.fetchPublicSettings(true)
+      store.patchPublicSettings({ redeem_enabled: true })
+      const forcedRefresh = store.fetchPublicSettings(true)
+
+      stale.resolve(createPublicSettings({ redeem_enabled: false }))
+      await firstRequest
+      await Promise.resolve()
+
+      expect(store.cachedPublicSettings?.redeem_enabled).toBe(true)
+      expect(getPublicSettings).toHaveBeenCalledTimes(2)
+
+      fresh.resolve(createPublicSettings({ redeem_enabled: true }))
+      await forcedRefresh
+
+      expect(store.cachedPublicSettings?.redeem_enabled).toBe(true)
+      expect((window as any).__APP_CONFIG__.redeem_enabled).toBe(true)
     })
   })
 })

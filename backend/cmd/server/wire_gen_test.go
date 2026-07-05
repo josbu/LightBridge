@@ -74,6 +74,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // backupSvc
 		nil, // paymentOrderExpiry
 		nil, // channelMonitorRunner
+		nil, // contentModerationService
 		nil, // quotaFlusher
 		nil, // lightBridgeConnectSync
 		nil, // aistudioProxyManager
