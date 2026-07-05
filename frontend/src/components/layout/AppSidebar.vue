@@ -741,7 +741,6 @@ const flagRedeem = makeSidebarFlag(FeatureFlags.redeem)
 const flagPromo = makeSidebarFlag(FeatureFlags.promo)
 const flagProxies = makeSidebarFlag(FeatureFlags.proxies)
 const flagChannelPricing = makeSidebarFlag(FeatureFlags.channelPricing)
-const flagLoginAgreement = makeSidebarFlag(FeatureFlags.loginAgreement)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 
@@ -877,7 +876,7 @@ const adminNavItems = computed((): NavItem[] => {
       hideInSimpleMode: true,
       children: [
         { path: '/admin/users', label: t('nav.users'), icon: UsersIcon },
-        { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon },
+        { path: '/admin/auth-settings', label: t('nav.authSettings'), icon: ShieldIcon },
       ],
     },
 
@@ -890,6 +889,7 @@ const adminNavItems = computed((): NavItem[] => {
       hideInSimpleMode: true,
       children: [
         { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
+        { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon },
         { path: '/admin/channels/pricing', label: t('nav.channelPricing'), icon: PriceTagIcon, featureFlag: flagChannelPricing },
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
         { path: '/admin/model-catalog', label: t('nav.modelCatalog'), icon: DatabaseIcon },

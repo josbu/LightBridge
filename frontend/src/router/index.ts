@@ -438,6 +438,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/auth-settings',
+    name: 'AdminAuthSettings',
+    component: () => import('@/views/admin/AuthSettingsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Auth Settings',
+      titleKey: 'nav.authSettings',
+      descriptionKey: 'admin.authSettings.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },
