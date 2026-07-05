@@ -1,11 +1,8 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('modules.title') }}</h1>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('modules.builtinFeaturesDescription') }}</p>
-        </div>
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ t('modules.title') }}</h1>
         <button class="btn btn-secondary" :disabled="loading" @click="loadAll">
           <Icon name="refresh" size="sm" :stroke-width="2" :class="{ 'animate-spin': loading }" />
           {{ t('modules.refresh') }}
@@ -169,6 +166,16 @@ const builtinFeatures = computed<BuiltinFeature[]>(() => {
       configPath: '/admin/settings/agreement',
       enabled: !!ps?.login_agreement_enabled,
       settingKey: 'login_agreement_enabled'
+    },
+    {
+      key: 'redeem',
+      title: t('modules.builtin.redeem'),
+      description: t('modules.builtin.redeemDesc'),
+      icon: 'ticket',
+      iconBg: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300',
+      configPath: '/admin/redeem',
+      enabled: !!ps?.redeem_enabled,
+      settingKey: 'redeem_enabled'
     }
   ]
 })

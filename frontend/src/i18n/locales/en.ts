@@ -7287,7 +7287,9 @@ export default {
       emailVerification: 'Email Verification',
       emailVerificationDesc: 'Email verification for user registration and password reset',
       loginAgreement: 'Login Agreement',
-      loginAgreementDesc: 'Terms agreement before user login/registration'
+      loginAgreementDesc: 'Terms agreement before user login/registration',
+      redeem: 'Redeem Codes',
+      redeemDesc: 'Users can redeem codes for credits or subscriptions'
     },
     installedModules: 'Installed Modules',
     installedDescription: 'Review installed modules and manage permissions, runtime state, and removal.',

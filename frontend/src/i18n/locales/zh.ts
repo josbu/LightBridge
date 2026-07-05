@@ -7443,7 +7443,9 @@ export default {
       emailVerification: '邮件验证',
       emailVerificationDesc: '用户注册与密码重置的邮件验证功能',
       loginAgreement: '登录条款',
-      loginAgreementDesc: '用户登录/注册前的条款同意功能'
+      loginAgreementDesc: '用户登录/注册前的条款同意功能',
+      redeem: '兑换码',
+      redeemDesc: '用户使用兑换码兑换额度或订阅'
     },
     installedModules: '已安装模块',
     installedDescription: '查看当前实例已安装的模块，管理权限、启用状态和卸载操作。',
