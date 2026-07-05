@@ -838,6 +838,11 @@ function combineFlags(...flags: Array<() => boolean | undefined>): () => boolean
   return () => flags.every((f) => f() !== false)
 }
 
+// anyFlags：任一子开关「非 false」即显示（用于分组：只要有一个子项启用，分组就显示）
+function anyFlags(...flags: Array<() => boolean | undefined>): () => boolean {
+  return () => flags.some((f) => f() !== false)
+}
+
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
 function buildSelfNavItems(withDashboard: boolean): NavItem[] {
@@ -1003,7 +1008,7 @@ const adminNavItems = computed((): NavItem[] => {
       icon: BellIcon,
       expandOnly: true,
       hideInSimpleMode: true,
-      featureFlag: combineFlags(flagAffiliate, flagAnnouncements, flagRedeem, flagPromo),
+      featureFlag: anyFlags(flagAffiliate, flagAnnouncements, flagRedeem, flagPromo),
       children: [
         { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon, featureFlag: flagAnnouncements },
         { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: UsersIcon, featureFlag: flagAffiliate },
@@ -1021,7 +1026,7 @@ const adminNavItems = computed((): NavItem[] => {
       icon: ShieldIcon,
       expandOnly: true,
       hideInSimpleMode: true,
-      featureFlag: combineFlags(flagRiskControl, flagPrivacyFilter),
+      featureFlag: anyFlags(flagRiskControl, flagPrivacyFilter),
       children: [
         { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, featureFlag: flagRiskControl },
         { path: '/admin/privacy-filter', label: t('nav.privacyFilter'), icon: ShieldIcon, featureFlag: flagPrivacyFilter },
