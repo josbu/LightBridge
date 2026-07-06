@@ -233,19 +233,21 @@ type OpenAIForwardResult struct {
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
-	ReasoningEffort    *string
-	Stream             bool
-	OpenAIWSMode       bool
-	ResponseHeaders    http.Header
-	Duration           time.Duration
-	FirstTokenMs       *int
-	ImageCount         int
-	ImageSize          string
-	ImageInputSize     string
-	ImageOutputSize    string
-	ImageOutputSizes   []string
-	ImageSizeSource    string
-	ImageSizeBreakdown map[string]int
+	ReasoningEffort     *string
+	Stream              bool
+	OpenAIWSMode        bool
+	ResponseHeaders     http.Header
+	Duration            time.Duration
+	FirstTokenMs        *int
+	ImageCount          int
+	ImageSize           string
+	ImageInputSize      string
+	ImageOutputSize     string
+	ImageOutputSizes    []string
+	ImageSizeSource     string
+	ImageSizeBreakdown  map[string]int
+	wsReplayInput       []json.RawMessage
+	wsReplayInputExists bool
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -5918,7 +5920,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
-	imageMultiplier := resolveImageRateMultiplier(apiKey, multiplier)
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, time.Now())
 
 	var cost *CostBreakdown
 	var err error

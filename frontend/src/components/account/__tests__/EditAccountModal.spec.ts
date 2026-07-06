@@ -167,6 +167,33 @@ function buildVertexAccount() {
   } as any
 }
 
+function buildCustomAccount() {
+  return {
+    id: 3,
+    name: 'Custom Responses',
+    notes: '',
+    platform: 'custom',
+    protocol: 'openai_responses',
+    type: 'apikey',
+    credentials: {
+      protocol: 'anthropic_messages',
+      base_url: 'https://upstream.example.com/v1',
+      api_key: 'sk-custom'
+    },
+    extra: {
+      protocol: 'openai_responses'
+    },
+    proxy_id: null,
+    concurrency: 1,
+    priority: 1,
+    rate_multiplier: 1,
+    status: 'active',
+    group_ids: [],
+    expires_at: null,
+    auto_pause_on_expired: false
+  } as any
+}
+
 function mountModal(account = buildAccount()) {
   return mount(EditAccountModal, {
     props: {
@@ -331,6 +358,23 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
       'chat_completions'
     ])
+  })
+
+  it('submits Custom protocol in extra and removes legacy credential protocol', async () => {
+    const account = buildCustomAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.protocol).toBe('openai_responses')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('protocol')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe('https://upstream.example.com/v1')
   })
 
 	it('submits OpenAI quota auto-pause thresholds in extra', async () => {

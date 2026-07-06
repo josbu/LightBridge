@@ -138,6 +138,13 @@ func ProtocolRouteDecisionForAccountProtocols(inbound string, account *Account) 
 
 	switch mode {
 	case RelayModeFullPassthrough:
+		if !containsProtocol(supported, inbound) {
+			return ProtocolRouteDecision{
+				InboundProtocol: inbound,
+				RelayMode:       mode,
+				FailureReason:   fmt.Sprintf("full passthrough mode does not support inbound protocol %q (supported: %s)", inbound, strings.Join(supported, ", ")),
+			}, false
+		}
 		target := preferredTargetProtocol(account, supported, inbound)
 		return ProtocolRouteDecision{
 			InboundProtocol:  inbound,
@@ -192,7 +199,7 @@ func ProtocolRouteDecisionForAccountProtocols(inbound string, account *Account) 
 	if !routePairImplemented(inbound, target) {
 		return ProtocolRouteDecision{
 			InboundProtocol: inbound,
-			TargetProtocol:   target,
+			TargetProtocol:  target,
 			RelayMode:       RelayModeRouter,
 			FailureReason:   fmt.Sprintf("conversion from %q to %q is not implemented", inbound, target),
 		}, false

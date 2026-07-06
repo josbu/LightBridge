@@ -494,6 +494,7 @@ export interface PaginationConfig {
 
 export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'grok' | 'antigravity' | 'custom'
 export type GroupUpstreamProtocol = 'openai_responses' | 'openai_chat_completions' | 'anthropic_messages' | 'gemini'
+export type AccountProtocol = GroupUpstreamProtocol | 'openai_embeddings'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -511,6 +512,10 @@ export interface Group {
   platform: GroupPlatform
   upstream_protocols?: GroupUpstreamProtocol[]
   rate_multiplier: number
+  peak_rate_enabled: boolean
+  peak_start: string
+  peak_end: string
+  peak_rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -633,6 +638,10 @@ export interface CreateGroupRequest {
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number
+  peak_rate_enabled?: boolean
+  peak_start?: string
+  peak_end?: string
+  peak_rate_multiplier?: number
   is_exclusive?: boolean
   subscription_type?: SubscriptionType
   daily_limit_usd?: number | null
@@ -667,6 +676,10 @@ export interface UpdateGroupRequest {
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number
+  peak_rate_enabled?: boolean
+  peak_start?: string
+  peak_end?: string
+  peak_rate_multiplier?: number
   is_exclusive?: boolean
   status?: 'active' | 'inactive'
   subscription_type?: SubscriptionType
@@ -875,6 +888,7 @@ export interface Account {
   name: string
   notes?: string | null
   platform: AccountPlatform
+  protocol?: AccountProtocol | string
   type: AccountType
   // 后端响应里 credentials 已脱敏：access_token / refresh_token / id_token /
   // api_key / session_key / cookie / aws_secret_access_key / aws_session_token /
@@ -1011,6 +1025,7 @@ export interface AccountUsageInfo {
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null
   seven_day_sonnet: UsageProgress | null
+  seven_day_fable?: UsageProgress | null
   gemini_shared_daily?: UsageProgress | null
   gemini_pro_daily?: UsageProgress | null
   gemini_flash_daily?: UsageProgress | null

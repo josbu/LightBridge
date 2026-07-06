@@ -263,6 +263,8 @@ export default {
     save: 'Save',
     saved: 'Saved successfully',
     deleted: 'Deleted successfully',
+    peakRateTooltip: 'Peak rate: {window}',
+    peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
     cancel: 'Cancel',
     delete: 'Delete',
     edit: 'Edit',
@@ -973,7 +975,22 @@ export default {
     exportExcelSuccess: 'Usage data exported successfully (Excel format)',
     exportExcelFailed: 'Failed to export usage data',
     imageUnit: ' images',
-    userAgent: 'User-Agent'
+    userAgent: 'User-Agent',
+    ipGeo: {
+      fetch: 'Fetch region',
+      fetching: 'Fetching...',
+      failed: 'Failed',
+      private: 'Private address',
+      refreshTitle: 'Refresh region info',
+      batchFetch: 'Batch fetch regions',
+      batchFetching: 'Fetching...',
+      pending: '{count} IPs pending',
+      batchFailed: 'Failed to batch fetch IP regions',
+      detailOrg: 'ISP',
+      detailTimezone: 'Timezone',
+      detailAccuracy: 'Accuracy',
+      detailCoordinates: 'Coordinates',
+    }
   },
 
   // Shared keys for channel monitor (admin + user views)
@@ -2478,6 +2495,13 @@ export default {
         disabled: 'Disabled',
         hint: 'Only token categories in usage billing logs are adjusted. No per-request mapping state is persisted.'
       },
+      peakRate: {
+        enable: 'Enable peak rate multiplier',
+        peakStart: 'Peak start',
+        peakEnd: 'Peak end',
+        peakMultiplier: 'Peak multiplier',
+        multiplierHint: 'Additional multiplier applied during the peak window. Token billing is affected; per-image billing is not.'
+      },
       supportedScopes: {
         title: 'Supported Model Families',
         tooltip: 'Select the model families this group supports. Unchecked families will not be routed to this group.',
@@ -3670,7 +3694,7 @@ export default {
         passthrough: 'Passthrough (same protocol)',
         passthroughDesc: 'Forward only when the inbound and target protocols are the same, bypassing router conversion.',
         fullPassthrough: 'Full passthrough (raw forwarding)',
-        fullPassthroughDesc: 'Forward the request and upstream response as-is for any protocol, replacing only authentication and required headers.'
+        fullPassthroughDesc: 'Forward the request and upstream response as-is only when the inbound and target protocols are the same, replacing only authentication and required headers.'
       },
       // OpenAI specific hints
       openai: {
@@ -3687,6 +3711,7 @@ export default {
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
         wsModePassthrough: 'Passthrough (passthrough)',
+        wsModeHttpBridge: 'HTTP Bridge (http_bridge)',
         wsModeShared: 'Shared (shared)',
         wsModeDedicated: 'Dedicated (dedicated)',
         wsModeConcurrencyHint:
@@ -5321,6 +5346,7 @@ export default {
         model: 'Model',
         group: 'Group',
         user: 'User',
+        clientIp: 'Client IP',
         userId: 'User ID',
         account: 'Account',
         accountId: 'Account ID',

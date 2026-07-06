@@ -77,12 +77,15 @@ func TestProtocolRouteDecision_RelayModes(t *testing.T) {
 			"relay_mode": RelayModeFullPassthrough,
 		},
 	}
-	decision, ok = ProtocolRouteDecisionForAccountProtocols(CustomProtocolAnthropicMessages, fullPassthrough)
+	_, ok = ProtocolRouteDecisionForAccountProtocols(CustomProtocolAnthropicMessages, fullPassthrough)
+	require.False(t, ok)
+
+	decision, ok = ProtocolRouteDecisionForAccountProtocols(CustomProtocolGemini, fullPassthrough)
 	require.True(t, ok)
 	require.Equal(t, RelayModeFullPassthrough, decision.RelayMode)
 	require.Equal(t, CustomProtocolGemini, decision.TargetProtocol)
-	require.Equal(t, CustomProtocolAnthropicMessages, decision.FinalRelayFormat)
-	require.Equal(t, []string{CustomProtocolAnthropicMessages}, decision.ConversionChain)
+	require.Equal(t, CustomProtocolGemini, decision.FinalRelayFormat)
+	require.Equal(t, []string{CustomProtocolGemini}, decision.ConversionChain)
 }
 
 func TestAccountRelayMode_LegacyFieldsMapToFullPassthrough(t *testing.T) {
@@ -114,7 +117,7 @@ func TestAccountRelayMode_LegacyFieldsMapToFullPassthrough(t *testing.T) {
 	}).RelayMode(), "explicit relay_mode should take precedence over legacy fields")
 }
 
-func TestFilterAccountsByRequestProtocol_MixedGroupAllowsRouterButRestrictsPassthrough(t *testing.T) {
+func TestFilterAccountsByRequestProtocol_MixedGroupAllowsRouterButRestrictsPassthroughModes(t *testing.T) {
 	ctx := WithInboundProtocol(context.Background(), CustomProtocolOpenAIResponses)
 	accounts := []Account{
 		{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey},
@@ -127,6 +130,13 @@ func TestFilterAccountsByRequestProtocol_MixedGroupAllowsRouterButRestrictsPasst
 			"protocol":   CustomProtocolGemini,
 			"relay_mode": RelayModeFullPassthrough,
 		}},
+		{ID: 5, Platform: PlatformCustom, Type: AccountTypeAPIKey, Extra: map[string]any{
+			"protocol": CustomProtocolAnthropicMessages,
+		}},
+		{ID: 6, Platform: PlatformCustom, Type: AccountTypeAPIKey, Extra: map[string]any{
+			"protocol":   CustomProtocolOpenAIResponses,
+			"relay_mode": RelayModePassthrough,
+		}},
 	}
 
 	filtered := filterAccountsByRequestProtocol(ctx, accounts)
@@ -134,7 +144,38 @@ func TestFilterAccountsByRequestProtocol_MixedGroupAllowsRouterButRestrictsPasst
 	for _, account := range filtered {
 		ids = append(ids, account.ID)
 	}
-	require.ElementsMatch(t, []int64{1, 2, 4}, ids)
+	require.ElementsMatch(t, []int64{1, 2, 5, 6}, ids)
+}
+
+func TestAccountMatchesRequestProtocol_RouterIgnoresMessageProtocolMismatch(t *testing.T) {
+	ctx := WithInboundProtocol(context.Background(), CustomProtocolOpenAIChatCompletions)
+	router := &Account{
+		Platform: PlatformCustom,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"protocol": CustomProtocolOpenAIResponses,
+		},
+	}
+	passthrough := &Account{
+		Platform: PlatformCustom,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"protocol":   CustomProtocolOpenAIResponses,
+			"relay_mode": RelayModePassthrough,
+		},
+	}
+	fullPassthrough := &Account{
+		Platform: PlatformCustom,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"protocol":   CustomProtocolOpenAIResponses,
+			"relay_mode": RelayModeFullPassthrough,
+		},
+	}
+
+	require.True(t, accountMatchesRequestProtocol(ctx, router))
+	require.False(t, accountMatchesRequestProtocol(ctx, passthrough))
+	require.False(t, accountMatchesRequestProtocol(ctx, fullPassthrough))
 }
 
 func TestSchedulingQueryPlatformsForMessageRequestIgnoresGroupPlatform(t *testing.T) {

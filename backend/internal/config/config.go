@@ -888,7 +888,7 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 type GatewayOpenAIWSConfig struct {
 	// ModeRouterV2Enabled: 新版 WS mode 路由开关（默认 false；关闭时保持 legacy 行为）
 	ModeRouterV2Enabled bool `mapstructure:"mode_router_v2_enabled"`
-	// IngressModeDefault: ingress 默认模式（off/ctx_pool/passthrough）
+	// IngressModeDefault: ingress 默认模式（off/ctx_pool/passthrough/http_bridge）
 	IngressModeDefault string `mapstructure:"ingress_mode_default"`
 	// Enabled: 全局总开关（默认 true）
 	Enabled bool `mapstructure:"enabled"`
@@ -912,6 +912,12 @@ type GatewayOpenAIWSConfig struct {
 	StoreDisabledForceNewConn bool `mapstructure:"store_disabled_force_new_conn"`
 	// PrewarmGenerateEnabled: 是否启用 WSv2 generate=false 预热（默认 false）
 	PrewarmGenerateEnabled bool `mapstructure:"prewarm_generate_enabled"`
+	// ClientReadLimitBytes: 入站客户端 WS 单帧读取上限。
+	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
+	// HTTPBridgeEnabled: 首包过大时，保持客户端 WS，改用 HTTP Responses 上游。
+	HTTPBridgeEnabled bool `mapstructure:"http_bridge_enabled"`
+	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
+	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
 
 	// Feature 开关：v2 优先于 v1
 	ResponsesWebsockets   bool `mapstructure:"responses_websockets"`
@@ -1860,6 +1866,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "strict")
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)
+	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
+	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
+	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.responses_websockets", false)
 	viper.SetDefault("gateway.openai_ws.responses_websockets_v2", true)
 	viper.SetDefault("gateway.openai_ws.max_conns_per_account", 128)
@@ -2597,6 +2606,15 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIWS.PrewarmCooldownMS < 0 {
 		return fmt.Errorf("gateway.openai_ws.prewarm_cooldown_ms must be non-negative")
 	}
+	if c.Gateway.OpenAIWS.ClientReadLimitBytes <= 0 {
+		return fmt.Errorf("gateway.openai_ws.client_read_limit_bytes must be positive")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes < 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be non-negative")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeEnabled && c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes == 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be positive when http_bridge_enabled is true")
+	}
 	if c.Gateway.OpenAIWS.FallbackCooldownSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.fallback_cooldown_seconds must be non-negative")
 	}
@@ -2618,11 +2636,11 @@ func (c *Config) Validate() error {
 	}
 	if mode := strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.IngressModeDefault)); mode != "" {
 		switch mode {
-		case "off", "ctx_pool", "passthrough":
+		case "off", "ctx_pool", "passthrough", "http_bridge":
 		case "shared", "dedicated":
-			slog.Warn("gateway.openai_ws.ingress_mode_default is deprecated, treating as ctx_pool; please update to off|ctx_pool|passthrough", "value", mode)
+			slog.Warn("gateway.openai_ws.ingress_mode_default is deprecated, treating as ctx_pool; please update to off|ctx_pool|passthrough|http_bridge", "value", mode)
 		default:
-			return fmt.Errorf("gateway.openai_ws.ingress_mode_default must be one of off|ctx_pool|passthrough")
+			return fmt.Errorf("gateway.openai_ws.ingress_mode_default must be one of off|ctx_pool|passthrough|http_bridge")
 		}
 	}
 	if mode := strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.StoreDisabledConnMode)); mode != "" {

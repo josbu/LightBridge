@@ -1,5 +1,6 @@
 <template>
   <div class="card overflow-hidden">
+    <IpGeoBatchToolbar :ips="data.map((row) => row.ip_address)" @failed="$emit('ipGeoBatchFailed')" />
     <div class="overflow-auto">
       <DataTable
         :columns="columns"
@@ -179,7 +180,10 @@
         </template>
 
         <template #cell-ip_address="{ row }">
-          <span v-if="row.ip_address" class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
+          <div v-if="row.ip_address" class="min-w-[9rem]">
+            <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
+            <IpGeoCell :ip="row.ip_address" />
+          </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
@@ -420,6 +424,8 @@ function getDisplayBillingMode(row: Pick<AdminUsageLog, 'billing_mode' | 'image_
 
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
+import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -442,6 +448,7 @@ withDefaults(defineProps<Props>(), {
 defineEmits<{
   userClick: [userID: number, email?: string]
   sort: [key: string, order: 'asc' | 'desc']
+  ipGeoBatchFailed: []
 }>()
 const { t } = useI18n()
 

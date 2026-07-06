@@ -1,5 +1,7 @@
 <template>
   <div class="flex h-full min-h-0 flex-col bg-white dark:bg-dark-900">
+    <IpGeoBatchToolbar :ips="rows.map((row) => row.client_ip)" @failed="emit('ipGeoBatchFailed')" />
+
     <!-- Loading State -->
     <div v-if="loading" class="flex flex-1 items-center justify-center py-10">
       <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
@@ -33,6 +35,9 @@
                 {{ t('admin.ops.errorLog.user') }}
               </th>
               <th class="border-b border-gray-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-dark-700 dark:text-dark-400">
+                {{ t('admin.ops.errorLog.clientIp') }}
+              </th>
+              <th class="border-b border-gray-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-dark-700 dark:text-dark-400">
                 {{ t('admin.ops.errorLog.status') }}
               </th>
               <th class="border-b border-gray-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-dark-700 dark:text-dark-400">
@@ -45,7 +50,7 @@
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
             <tr v-if="rows.length === 0">
-              <td colspan="10" class="py-12 text-center text-sm text-gray-400 dark:text-dark-500">
+              <td colspan="11" class="py-12 text-center text-sm text-gray-400 dark:text-dark-500">
                 {{ t('admin.ops.errorLog.noErrors') }}
               </td>
             </tr>
@@ -147,6 +152,15 @@
                 </template>
               </td>
 
+              <!-- Client IP -->
+              <td class="px-4 py-2">
+                <div v-if="log.client_ip" class="min-w-[8.5rem]">
+                  <span class="font-mono text-[11px] text-gray-600 dark:text-gray-400">{{ log.client_ip }}</span>
+                  <IpGeoCell :ip="log.client_ip" />
+                </div>
+                <span v-else class="text-xs text-gray-400">-</span>
+              </td>
+
               <!-- Status -->
               <td class="whitespace-nowrap px-4 py-2">
                 <div class="flex items-center gap-1.5">
@@ -212,6 +226,8 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
+import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
@@ -298,6 +314,7 @@ interface Emits {
   (e: 'openErrorDetail', id: number): void
   (e: 'update:page', value: number): void
   (e: 'update:pageSize', value: number): void
+  (e: 'ipGeoBatchFailed'): void
 }
 
 defineProps<Props>()

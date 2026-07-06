@@ -13,13 +13,13 @@ import (
 // 存储；调度别名仍可能是 "antigravity"，见 Account.IsAntigravity / EffectivePlatform。
 //
 // 背景二（Custom）：Custom 账号以 platform="custom" + extra["protocol"] 存储，可加入
-// **任意（非 antigravity）分组**。某 Custom 账号能否服务某请求，取决于其 protocol 是否
-// 与请求的「入站协议」一致（入站协议由 handler 依入站 endpoint 推导，经 ctxkey.RequiredProtocol
-// 注入 context）。因此 Custom 的调度分两级：
+// **任意（非 antigravity）分组**。router 模式下，调度层不再把账号 protocol 与入站协议
+// 做强匹配；只要求账号拥有可路由的消息协议能力，最终转换链由 ProtocolRouter 在转发前决定。
+// 只有 passthrough / full_passthrough 模式保留请求级协议匹配。因此 Custom 的调度分两级：
 //   - 候选级（与 endpoint 无关）：Custom 账号进入其所属分组的候选集（见 accountServesSchedulingPlatform）。
-//   - 请求级（与 endpoint 相关）：按 requiredProtocol 过滤掉 protocol 不匹配的 Custom 账号
-//     （见 filterAccountsByRequestProtocol）。请求级过滤必须在取得候选列表之后做，
-//     因为调度快照按 (group, platform, mode) 缓存、跨入站 endpoint 共享。
+//   - 请求级（与 endpoint 相关）：仅对非消息协议、passthrough、full_passthrough 执行协议过滤
+//     （见 filterAccountsByRequestProtocol）。请求级过滤必须在取得候选列表之后做，因为调度快照
+//     按 (group, platform, mode) 缓存、跨入站 endpoint 共享。
 //
 // 调度语义总表（候选级）：
 //   - platform=="antigravity"            → 仅 Antigravity 账号（Custom 一律排除）。
@@ -157,7 +157,9 @@ func requiredProtocolFromContext(ctx context.Context) string {
 }
 
 // filterAccountsByRequestProtocol 按请求级入站协议和账号 relay_mode 过滤候选账号。
-// requiredProtocol 为空时原样返回（不过滤）。返回新切片，不修改入参底层数组（避免污染快照缓存）。
+// router 模式的消息协议请求不做入站/上游协议强匹配；passthrough / full_passthrough
+// 以及非消息协议请求仍使用 ProtocolRouter 的严格判定。requiredProtocol 为空时原样返回。
+// 返回新切片，不修改入参底层数组（避免污染快照缓存）。
 func filterAccountsByRequestProtocol(ctx context.Context, accounts []Account) []Account {
 	required := requiredProtocolFromContext(ctx)
 	if required == "" {
@@ -165,7 +167,7 @@ func filterAccountsByRequestProtocol(ctx context.Context, accounts []Account) []
 	}
 	out := make([]Account, 0, len(accounts))
 	for i := range accounts {
-		if _, ok := ProtocolRouteDecisionForAccountProtocols(required, &accounts[i]); !ok {
+		if !accountMatchesRequestProtocol(ctx, &accounts[i]) {
 			continue
 		}
 		out = append(out, accounts[i])
@@ -180,6 +182,21 @@ func accountMatchesRequestProtocol(ctx context.Context, a *Account) bool {
 	if required == "" || a == nil {
 		return true
 	}
+	if IsMessageProtocol(required) && a.RelayMode() == RelayModeRouter {
+		return accountSupportsAnyMessageProtocol(a)
+	}
 	_, ok := ProtocolRouteDecisionForAccountProtocols(required, a)
 	return ok
+}
+
+func accountSupportsAnyMessageProtocol(a *Account) bool {
+	if a == nil {
+		return false
+	}
+	for _, proto := range a.SupportedTargetProtocols() {
+		if IsMessageProtocol(proto) {
+			return true
+		}
+	}
+	return false
 }

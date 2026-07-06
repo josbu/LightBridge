@@ -591,6 +591,79 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_EnabledAllowsMessagePro
 	require.Equal(t, 1, decision.CandidateCount)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_RouterCustomResponsesServesChatMIMO(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := WithInboundProtocol(context.Background(), CustomProtocolOpenAIChatCompletions)
+	groupID := int64(10113)
+	accounts := []Account{
+		{
+			ID:          37030,
+			Platform:    PlatformCustom,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"mimo-v2.5-pro": "mimo-v2.5-pro",
+				},
+			},
+			Extra: map[string]any{
+				"protocol":   CustomProtocolOpenAIResponses,
+				"relay_mode": RelayModePassthrough,
+			},
+		},
+		{
+			ID:          37031,
+			Platform:    PlatformCustom,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    5,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"mimo-v2.5-pro": "mimo-v2.5-pro",
+				},
+			},
+			Extra: map[string]any{
+				"protocol": CustomProtocolOpenAIResponses,
+			},
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"mimo-v2.5-pro",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(37031), selection.Account.ID)
+	require.Equal(t, PlatformCustom, selection.Account.Platform)
+	require.Equal(t, CustomProtocolOpenAIResponses, selection.Account.CustomProtocol())
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, decision.CandidateCount)
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_Enabled_EmbeddingsSkipsChatOnlyAccount(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 

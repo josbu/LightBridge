@@ -94,6 +94,8 @@ func TestGroup_GetImagePrice_PartialConfig(t *testing.T) {
 func TestAccountUpstreamProtocols_DerivesMessageProtocolsFromAccountCapabilities(t *testing.T) {
 	openAI := &Account{Platform: PlatformOpenAI}
 	require.Equal(t, []string{
+		CustomProtocolAnthropicMessages,
+		CustomProtocolGemini,
 		CustomProtocolOpenAIChatCompletions,
 		CustomProtocolOpenAIResponses,
 	}, AccountUpstreamProtocols(openAI))
@@ -102,7 +104,33 @@ func TestAccountUpstreamProtocols_DerivesMessageProtocolsFromAccountCapabilities
 	require.Equal(t, []string{
 		CustomProtocolAnthropicMessages,
 		CustomProtocolGemini,
+		CustomProtocolOpenAIChatCompletions,
+		CustomProtocolOpenAIResponses,
 	}, AccountUpstreamProtocols(antigravity))
+
+	customRouter := &Account{
+		Platform: PlatformCustom,
+		Extra: map[string]any{
+			"protocol": CustomProtocolOpenAIResponses,
+		},
+	}
+	require.Equal(t, []string{
+		CustomProtocolAnthropicMessages,
+		CustomProtocolGemini,
+		CustomProtocolOpenAIChatCompletions,
+		CustomProtocolOpenAIResponses,
+	}, AccountUpstreamProtocols(customRouter))
+
+	customPassthrough := &Account{
+		Platform: PlatformCustom,
+		Extra: map[string]any{
+			"protocol":   CustomProtocolOpenAIResponses,
+			"relay_mode": RelayModePassthrough,
+		},
+	}
+	require.Equal(t, []string{
+		CustomProtocolOpenAIResponses,
+	}, AccountUpstreamProtocols(customPassthrough))
 
 	customEmbedding := &Account{
 		Platform: PlatformCustom,

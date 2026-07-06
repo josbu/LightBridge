@@ -2647,6 +2647,7 @@ import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
+  OPENAI_WS_MODE_HTTP_BRIDGE,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
   isOpenAIWSModeEnabled,
@@ -2880,7 +2881,8 @@ const editResetTimezone = ref<string | null>(null)
 const openAIWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
-  { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
+  { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') },
+  { value: OPENAI_WS_MODE_HTTP_BRIDGE, label: t('admin.accounts.openai.wsModeHttpBridge') }
 ])
 const relayModeOptions = computed(() => [
   { value: RELAY_MODE_ROUTER, label: t('admin.accounts.relayMode.router') },
@@ -3288,7 +3290,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (newAccount.platform === 'custom') {
     customRelayMode.value = normalizeRelayMode(extra)
     const customCredentials = newAccount.credentials as Record<string, unknown> | undefined
-    editCustomProtocol.value = (customCredentials?.protocol as string) || ''
+    editCustomProtocol.value =
+      newAccount.protocol ||
+      (extra?.protocol as string) ||
+      (customCredentials?.protocol as string) ||
+      ''
     editCustomBaseUrl.value = (customCredentials?.base_url as string) || ''
   }
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
@@ -4521,13 +4527,14 @@ const handleSubmit = async () => {
 
     // For Custom accounts, handle credentials update (protocol, base_url, api_key) and relay mode in extra.
     if (props.account.platform === 'custom') {
+      const selectedCustomProtocol = editCustomProtocol.value.trim()
+      if (!selectedCustomProtocol) {
+        appStore.showError(t('admin.accounts.custom.pleaseSelectProtocol'))
+        return
+      }
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
-
-      // Update protocol
-      if (editCustomProtocol.value) {
-        newCredentials.protocol = editCustomProtocol.value
-      }
+      delete newCredentials.protocol
 
       // Update base URL
       if (editCustomBaseUrl.value.trim()) {
@@ -4544,6 +4551,7 @@ const handleSubmit = async () => {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
         (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
+      newExtra.protocol = selectedCustomProtocol
       writeRelayModeToExtra(newExtra, customRelayMode.value)
       updatePayload.extra = newExtra
     }

@@ -5,6 +5,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import OpsErrorLogTable from './OpsErrorLogTable.vue'
 import { opsAPI, type OpsErrorLog } from '@/api/admin/ops'
+import { useAppStore } from '@/stores'
 
 interface Props {
   show: boolean
@@ -21,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const appStore = useAppStore()
 
 
 const loading = ref(false)
@@ -123,6 +125,10 @@ async function fetchErrorLogs() {
   } finally {
     loading.value = false
   }
+}
+
+function handleIpGeoBatchFailed() {
+  appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 
   function resetFilters() {
@@ -253,6 +259,7 @@ watch(
             :page="page"
             :page-size="pageSize"
             @openErrorDetail="emit('openErrorDetail', $event)"
+            @ipGeoBatchFailed="handleIpGeoBatchFailed"
 
             @update:page="page = $event"
             @update:pageSize="pageSize = $event"

@@ -263,6 +263,8 @@ export default {
     save: '保存',
     saved: '保存成功',
     deleted: '删除成功',
+    peakRateTooltip: '高峰倍率：{window}',
+    peakRateImageNote: '；token 计费的图片 token 同样适用，图片按次计费不受高峰影响',
     cancel: '取消',
     delete: '删除',
     edit: '编辑',
@@ -977,7 +979,22 @@ export default {
     exportExcelSuccess: '使用数据导出成功（Excel格式）',
     exportExcelFailed: '使用数据导出失败',
     imageUnit: '张',
-    userAgent: 'User-Agent'
+    userAgent: 'User-Agent',
+    ipGeo: {
+      fetch: '获取地区',
+      fetching: '获取中...',
+      failed: '获取失败',
+      private: '内网地址',
+      refreshTitle: '刷新地区信息',
+      batchFetch: '批量获取地区',
+      batchFetching: '获取中...',
+      pending: '{count} 个 IP 待获取地区',
+      batchFailed: '批量获取地区信息失败',
+      detailOrg: '运营商',
+      detailTimezone: '时区',
+      detailAccuracy: '定位精度',
+      detailCoordinates: '坐标',
+    }
   },
 
   // Shared keys for channel monitor (admin + user views)
@@ -2556,6 +2573,13 @@ export default {
         enabled: '已启用',
         disabled: '已禁用'
       },
+      peakRate: {
+        enable: '启用高峰时段倍率',
+        peakStart: '高峰开始',
+        peakEnd: '高峰结束',
+        peakMultiplier: '高峰倍率',
+        multiplierHint: '在高峰窗口内额外叠加的倍率。Token 计费受影响，图片按次计费不受影响。'
+      },
       supportedScopes: {
         title: '支持的模型系列',
         tooltip: '选择此分组支持的模型系列。未勾选的系列将不会被路由到此分组。',
@@ -3834,7 +3858,7 @@ export default {
         passthrough: '透传（同协议）',
         passthroughDesc: '仅当入站协议与目标账号协议一致时透传，绕过 Router 转换。',
         fullPassthrough: '完全透传（原样转发）',
-        fullPassthroughDesc: '任意协议原样转发请求与上游响应，仅替换认证和必要请求头。'
+        fullPassthroughDesc: '仅当入站协议与目标账号协议一致时原样转发请求与上游响应，仅替换认证和必要请求头。'
       },
       // OpenAI specific hints
       openai: {
@@ -3851,6 +3875,7 @@ export default {
         wsModeOff: '关闭（off）',
         wsModeCtxPool: '上下文池（ctx_pool）',
         wsModePassthrough: '透传（passthrough）',
+        wsModeHttpBridge: 'HTTP 桥接（http_bridge）',
         wsModeShared: '共享（shared）',
         wsModeDedicated: '独享（dedicated）',
         wsModeConcurrencyHint: '启用 WS mode 后，该账号并发数将作为该账号 WS 连接池上限。',
@@ -5481,6 +5506,7 @@ export default {
         model: '模型',
         group: '分组',
         user: '用户',
+        clientIp: '客户端 IP',
         userId: '用户 ID',
         account: '账号',
         accountId: '账号 ID',

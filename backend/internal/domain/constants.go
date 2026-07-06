@@ -34,8 +34,9 @@ const (
 
 	// PlatformCustom 是「自定义 Provider」平台。Custom 账号通过自定义 Base URL +
 	// API Key 连接任意上游，并显式选择上游协议（见 CustomProtocol* 常量）。
-	// Custom 账号不受分组类型限制：可加入任意分组，按其 protocol 与请求的入站协议
-	// 匹配来决定是否参与该请求调度；转发时复用对应原生协议的转发栈。
+	// Custom 账号不受分组类型限制：可加入任意分组。router 模式下 protocol 表示上游
+	// 目标协议，由 ProtocolRouter 在转发前决定转换链；passthrough / full_passthrough
+	// 模式下才要求请求入站协议与该 protocol 匹配。
 	PlatformCustom = "custom"
 )
 
