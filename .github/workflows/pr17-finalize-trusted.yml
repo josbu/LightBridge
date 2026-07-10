@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: trusted-pr17-finalizer
+  cancel-in-progress: true
+
 jobs:
   apply:
     if: contains(github.event.head_commit.message, '[pr17-apply]')
@@ -17,6 +21,20 @@ jobs:
         with:
           ref: fix/universal-router-diagnostics-phase1
           fetch-depth: 0
+
+      - name: Mark finalizer start and synchronize main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'openai-ci-fixer'
+          git config user.email 'openai-ci-fixer@users.noreply.github.com'
+          git fetch origin main
+          git merge --no-edit origin/main
+          echo "started" > .pr17-apply-state
+          git add .pr17-apply-state
+          git commit -m 'chore(ci): mark PR17 remediation start'
+          git push origin HEAD:fix/universal-router-diagnostics-phase1
+
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.5'
@@ -32,13 +50,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Synchronize main and apply validated fixes
+      - name: Apply validated fixes
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main
-          git merge --no-edit origin/main
-
           python <<'PY'
           from pathlib import Path
           import importlib.util
@@ -84,11 +99,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'openai-ci-fixer'
-          git config user.email 'openai-ci-fixer@users.noreply.github.com'
+          rm -f .pr17-apply-state
           git add -A
           git reset .github/workflows/fix-pr17-checks.yml tools/fix_pr17_checks.py .pr17-ci-trigger
-          if ! git diff --cached --quiet; then
-            git commit -m 'fix: complete CI and security remediation'
-          fi
+          git commit -m 'fix: complete CI and security remediation'
           git push origin HEAD:fix/universal-router-diagnostics-phase1
