@@ -291,7 +291,7 @@ describe('ImportDataModal', () => {
 
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: {
-        type: 'lightbridge',
+        type: 'LightBridge-data',
         version: 1,
         exported_at: expect.any(String),
         proxies: [],
@@ -519,7 +519,7 @@ describe('ImportDataModal', () => {
     })
     expect(adminAPI.accounts.importData).toHaveBeenCalledWith({
       data: {
-        type: 'lightbridge',
+        type: 'LightBridge-data',
         version: 1,
         exported_at: expect.any(String),
         proxies: [],

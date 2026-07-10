@@ -1,7 +1,8 @@
 // frontend/src/views/admin/ops/utils/errorExport.ts
 import type { OpsErrorDetail } from '@/api/admin/ops'
 import type { ErrorAnalysisResult, ErrorAnalysisAccountDiagnostic } from './errorAnalysis'
-import { accountDisplayLabel } from './errorAnalysis'
+import { accountDisplayLabel, accountRoutingSummary, formatSchedulerGateCounts } from './errorAnalysis'
+import { resolveUpstreamPayload } from './errorDetailResponse'
 
 const SEPARATOR = '─'.repeat(48)
 const DOUBLE_SEPARATOR = '='.repeat(60)
@@ -42,7 +43,7 @@ function formatAnalysisSteps(analysis: ErrorAnalysisResult): string[] {
   return lines
 }
 
-function formatSchedulerDiagnostics(diagnostics: ErrorAnalysisAccountDiagnostic[]): string[] {
+function formatSchedulerDiagnostics(diagnostics: ErrorAnalysisAccountDiagnostic[], detail: OpsErrorDetail): string[] {
   if (diagnostics.length === 0) return []
   const available = diagnostics.filter(d => d.available).length
   const lines: string[] = [
@@ -55,6 +56,7 @@ function formatSchedulerDiagnostics(diagnostics: ErrorAnalysisAccountDiagnostic[
     const label = accountDisplayLabel(diag.account)
     lines.push(`  ${status} ${label} (#${diag.account.id})`)
     lines.push(`    平台: ${diag.account.platform} | 状态: ${diag.account.status}`)
+    lines.push(`    路由: ${accountRoutingSummary(diag.account, detail)}`)
     if (diag.reasons.length > 0) {
       for (const reason of diag.reasons) {
         lines.push(`    原因: ${reason.key}${reason.detail ? ': ' + reason.detail : ''}`)
@@ -67,14 +69,64 @@ function formatSchedulerDiagnostics(diagnostics: ErrorAnalysisAccountDiagnostic[
   return lines
 }
 
+function formatSchedulerGateDiagnostics(analysis: ErrorAnalysisResult): string[] {
+  const diagnostics = analysis.schedulerGateDiagnostics
+  if (!diagnostics) return []
+  const lines = [
+    '  调度器 Gate 诊断:',
+    `  主阻断门: ${diagnostics.primaryGate || '—'}`,
+    `  Gate 计数: ${formatSchedulerGateCounts(diagnostics)}`
+  ]
+  if (diagnostics.freshDBRetry != null) {
+    lines.push(`  Fresh DB 重试: ${diagnostics.freshDBRetry ? 'true' : 'false'}${diagnostics.freshDBRetryReason ? ` (${diagnostics.freshDBRetryReason})` : ''}`)
+  }
+  if (diagnostics.sampleRejectedAccounts.length > 0) {
+    lines.push(`  样例拒绝账号: ${diagnostics.sampleRejectedAccounts.join(', ')}`)
+  }
+  if (diagnostics.raw) {
+    lines.push(`  原始诊断: ${diagnostics.raw}`)
+  }
+  return lines
+}
+
 function formatUpstreamErrors(errors: OpsErrorDetail[]): string[] {
   if (errors.length === 0) return []
   const lines: string[] = ['  上游尝试记录:']
   for (let i = 0; i < errors.length; i++) {
     const ev = errors[i]
-    lines.push(`  #${i + 1}  状态码: ${ev.status_code ?? '—'}  |  账户: ${ev.account_name || ev.account_id || '—'}`)
+    const upstreamStatus = ev.upstream_status_code ?? ev.status_code ?? '—'
+    lines.push(`  #${i + 1}  状态码: ${upstreamStatus}  |  账户: ${ev.account_name || ev.account_id || '—'}`)
+    if (ev.upstream_endpoint) lines.push(`      上游端点: ${ev.upstream_endpoint}`)
+    if (ev.upstream_error_message) lines.push(`      上游消息: ${ev.upstream_error_message}`)
+    if (ev.upstream_error_detail) lines.push(`      上游详情: ${ev.upstream_error_detail}`)
     if (ev.message) lines.push(`      ${ev.message}`)
+    const upstreamPayload = resolveUpstreamPayload(ev)
+    if (upstreamPayload) {
+      lines.push('      上游响应:')
+      lines.push(prettyJSON(upstreamPayload))
+    }
     lines.push('')
+  }
+  return lines
+}
+
+function formatPrimaryUpstreamFeedback(detail: OpsErrorDetail): string[] {
+  const upstreamPayload = resolveUpstreamPayload(detail)
+  const hasFeedback = detail.upstream_status_code != null ||
+    !!String(detail.upstream_error_message || '').trim() ||
+    !!String(detail.upstream_error_detail || '').trim() ||
+    !!String(upstreamPayload || '').trim()
+  if (!hasFeedback) return []
+  const lines = [
+    formatField('上游状态码:', detail.upstream_status_code),
+    formatField('上游端点:', detail.upstream_endpoint),
+    formatField('上游错误消息:', detail.upstream_error_message),
+    formatField('上游错误详情:', detail.upstream_error_detail),
+  ]
+  if (upstreamPayload) {
+    lines.push('')
+    lines.push('  上游反馈体:')
+    lines.push(prettyJSON(upstreamPayload))
   }
   return lines
 }
@@ -160,10 +212,16 @@ export function buildSingleErrorTXT(data: ErrorExportData): string {
     formatField('错误消息:', detail.message),
     formatField('上游状态码:', detail.upstream_status_code),
     formatField('上游错误消息:', detail.upstream_error_message),
+    formatField('上游错误详情:', detail.upstream_error_detail),
     '',
     '  响应体:',
     prettyJSON(detail.error_body),
   ]))
+
+  const primaryUpstreamFeedback = formatPrimaryUpstreamFeedback(detail)
+  if (primaryUpstreamFeedback.length > 0) {
+    sections.push(formatSection('上游错误反馈', primaryUpstreamFeedback))
+  }
 
   // Latency info
   sections.push(formatSection('延迟信息', [
@@ -183,6 +241,8 @@ export function buildSingleErrorTXT(data: ErrorExportData): string {
     '',
     ...formatAnalysisSteps(analysis),
     '',
+    ...formatSchedulerGateDiagnostics(analysis),
+    ...(analysis.schedulerGateDiagnostics ? [''] : []),
     '  证据:',
     ...analysis.evidence.map(ev => `    - ${ev.key}: ${ev.value}`),
     '',
@@ -193,7 +253,7 @@ export function buildSingleErrorTXT(data: ErrorExportData): string {
 
   // Scheduler diagnostics
   if (schedulerDiagnostics && schedulerDiagnostics.length > 0) {
-    sections.push(formatSection('调度账户诊断', formatSchedulerDiagnostics(schedulerDiagnostics)))
+    sections.push(formatSection('调度账户诊断', formatSchedulerDiagnostics(schedulerDiagnostics, detail)))
   }
 
   // Upstream attempts

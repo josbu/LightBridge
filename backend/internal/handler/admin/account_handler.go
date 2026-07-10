@@ -1663,6 +1663,18 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// RepairOpenAIOAuthPlatform repairs OpenAI OAuth accounts that were incorrectly
+// persisted as Gemini OAuth accounts by an older upgrade/sync path.
+// POST /api/v1/admin/accounts/repair/openai-oauth-platform
+func (h *AccountHandler) RepairOpenAIOAuthPlatform(c *gin.Context) {
+	result, err := h.adminService.RepairMisclassifiedOpenAIOAuthAccounts(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *service.BulkUpdateAccountFilters {
 	if filters == nil {
 		return nil

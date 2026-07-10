@@ -27,6 +27,7 @@ import (
 const (
 	dataType                  = "LightBridge-data"
 	legacyDataType            = "LightBridge-bundle"
+	authconvDataTypeAlias     = "lightbridge"
 	dataVersion               = 1
 	dataPageCap               = 1000
 	dataImportRemoteMaxBytes  = 20 << 20
@@ -702,7 +703,7 @@ func parseIncludeProxies(c *gin.Context) (bool, error) {
 }
 
 func validateDataHeader(payload DataPayload) error {
-	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType {
+	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType && strings.ToLower(payload.Type) != authconvDataTypeAlias {
 		return fmt.Errorf("unsupported data type: %s", payload.Type)
 	}
 	if payload.Version != 0 && payload.Version != dataVersion {

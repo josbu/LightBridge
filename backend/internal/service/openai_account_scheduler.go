@@ -789,20 +789,33 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 	selectionOrder []openAIAccountCandidateScore,
+	stats *openAIAccountSelectionFailureStats,
 ) (*AccountSelectionResult, bool, error) {
 	compactBlocked := false
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.RequiredCapability, req.Platform)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			if stats != nil {
+				stats.FreshRecheckRejected++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+			}
 			continue
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability, req.Platform)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			if stats != nil {
+				stats.FreshRecheckRejected++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+			}
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
 			compactBlocked = true
+			if stats != nil {
+				stats.CompactUnsupported++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+			}
 			continue
 		}
 		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -819,6 +832,10 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 				ReleaseFunc: result.ReleaseFunc,
 			}, compactBlocked, nil
 		}
+		if stats != nil {
+			stats.SlotAcquireMiss++
+			stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+		}
 	}
 	return nil, compactBlocked, nil
 }
@@ -831,131 +848,366 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
-	if len(accounts) == 0 {
-		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
+	retriedFreshDB := false
+	freshDBRetryReason := ""
+	retryWithFreshDB := func(reason string) bool {
+		if retriedFreshDB || s == nil || s.service == nil || s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
+			return false
+		}
+		freshAccounts, freshErr := s.service.listSchedulableAccountsFromDB(ctx, req.GroupID, req.Platform)
+		if freshErr != nil {
+			slog.Warn("openai scheduler fresh DB retry failed",
+				"reason", reason,
+				"group_id", derefGroupID(req.GroupID),
+				"platform", req.Platform,
+				"model", req.RequestedModel,
+				"error", freshErr)
+			return false
+		}
+		retriedFreshDB = true
+		freshDBRetryReason = reason
+		accounts = freshAccounts
+		slog.Warn("openai scheduler retrying with fresh DB accounts",
+			"reason", reason,
+			"group_id", derefGroupID(req.GroupID),
+			"platform", req.Platform,
+			"model", req.RequestedModel,
+			"account_count", len(freshAccounts))
+		return true
 	}
 
-	// require_privacy_set: 获取分组信息
-	var schedGroup *Group
-	if req.GroupID != nil && s.service.schedulerSnapshot != nil {
-		schedGroup, _ = s.service.schedulerSnapshot.GetGroupByID(ctx, *req.GroupID)
-	}
-
-	filtered := make([]*Account, 0, len(accounts))
-	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
-	for i := range accounts {
-		account := &accounts[i]
-		if req.ExcludedIDs != nil {
-			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+	for {
+		if len(accounts) == 0 {
+			if retryWithFreshDB("empty_snapshot_accounts") {
 				continue
 			}
+			stats := newOpenAIAccountSelectionFailureStats(accounts, retriedFreshDB, freshDBRetryReason)
+			return nil, 0, 0, 0, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, false, stats)
 		}
-		if !account.IsSchedulable() {
-			continue
-		}
-		if s.service.isOpenAIAccountRuntimeBlocked(account) {
-			continue
-		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
-			s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
-			_ = s.service.accountRepo.SetError(ctx, account.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
-			continue
-		}
-		if !s.isAccountRequestCompatible(ctx, account, req) {
-			continue
-		}
-		if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-			continue
-		}
-		filtered = append(filtered, account)
-		loadReq = append(loadReq, AccountWithConcurrency{
-			ID:             account.ID,
-			MaxConcurrency: account.EffectiveLoadFactor(),
-		})
-	}
-	if len(filtered) == 0 {
-		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
-	}
 
-	loadMap := map[int64]*AccountLoadInfo{}
-	if s.service.concurrencyService != nil {
-		if batchLoad, loadErr := s.service.concurrencyService.GetAccountsLoadBatch(ctx, loadReq); loadErr == nil {
-			loadMap = batchLoad
+		// require_privacy_set: 获取分组信息
+		var schedGroup *Group
+		if req.GroupID != nil && s.service.schedulerSnapshot != nil {
+			schedGroup, _ = s.service.schedulerSnapshot.GetGroupByID(ctx, *req.GroupID)
 		}
-	}
 
-	plan := s.buildOpenAIAccountLoadPlan(req, filtered, loadMap)
-	candidateCount := plan.candidateCount
-	topK := plan.topK
-	loadSkew := plan.loadSkew
-	selectionOrder := plan.selectionOrder
-	if req.RequireCompact && len(plan.candidates) == 0 && len(plan.staleSnapshotCompactRetry) == 0 {
-		return nil, 0, 0, 0, ErrNoAvailableCompactAccounts
-	}
-	if req.RequireCompact && len(selectionOrder) == 0 && s.service.schedulerSnapshot == nil {
-		return nil, candidateCount, topK, loadSkew, ErrNoAvailableCompactAccounts
-	}
-	if len(selectionOrder) == 0 {
-		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, req.RequireCompact && len(plan.allCandidates) > 0)
-	}
-
-	result, compactBlocked, acquireErr := s.tryAcquireOpenAISelectionOrder(ctx, req, selectionOrder)
-	if acquireErr != nil {
-		return nil, candidateCount, topK, loadSkew, acquireErr
-	}
-	if result != nil {
-		return result, candidateCount, topK, loadSkew, nil
-	}
-
-	if s.service.concurrencyService != nil {
-		if freshLoadMap, loadErr := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadReq); loadErr == nil {
-			freshPlan := s.buildOpenAIAccountLoadPlan(req, filtered, freshLoadMap)
-			if len(freshPlan.selectionOrder) > 0 {
-				freshResult, freshCompactBlocked, freshAcquireErr := s.tryAcquireOpenAISelectionOrder(ctx, req, freshPlan.selectionOrder)
-				if freshAcquireErr != nil {
-					return nil, candidateCount, topK, loadSkew, freshAcquireErr
+		filtered := make([]*Account, 0, len(accounts))
+		loadReq := make([]AccountWithConcurrency, 0, len(accounts))
+		stats := newOpenAIAccountSelectionFailureStats(accounts, retriedFreshDB, freshDBRetryReason)
+		for i := range accounts {
+			account := &accounts[i]
+			if req.ExcludedIDs != nil {
+				if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+					stats.Excluded++
+					continue
 				}
-				if freshResult != nil {
-					return freshResult, freshPlan.candidateCount, freshPlan.topK, freshPlan.loadSkew, nil
-				}
-				compactBlocked = compactBlocked || freshCompactBlocked
-				selectionOrder = freshPlan.selectionOrder
-				candidateCount = freshPlan.candidateCount
-				topK = freshPlan.topK
-				loadSkew = freshPlan.loadSkew
+			}
+			if !account.IsSchedulable() {
+				stats.Unschedulable++
+				continue
+			}
+			if s.service.isOpenAIAccountRuntimeBlocked(account) {
+				stats.RuntimeBlocked++
+				continue
+			}
+			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
+			if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
+				s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
+				_ = s.service.accountRepo.SetError(ctx, account.ID,
+					fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+				stats.PrivacyRequired++
+				continue
+			}
+			if reason := s.openAIAccountRequestIncompatibleReason(ctx, account, req); reason != "" {
+				stats.Record(reason, account.ID)
+				continue
+			}
+			if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+				stats.TransportUnsupported++
+				continue
+			}
+			stats.Eligible++
+			filtered = append(filtered, account)
+			loadReq = append(loadReq, AccountWithConcurrency{
+				ID:             account.ID,
+				MaxConcurrency: account.EffectiveLoadFactor(),
+			})
+		}
+		if len(filtered) == 0 {
+			if retryWithFreshDB("snapshot_accounts_filtered_out") {
+				continue
+			}
+			return nil, 0, 0, 0, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, false, stats)
+		}
+
+		loadMap := map[int64]*AccountLoadInfo{}
+		if s.service.concurrencyService != nil {
+			if batchLoad, loadErr := s.service.concurrencyService.GetAccountsLoadBatch(ctx, loadReq); loadErr == nil {
+				loadMap = batchLoad
 			}
 		}
-	}
 
-	cfg := s.service.schedulingConfig()
-	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
-	for _, candidate := range selectionOrder {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.RequiredCapability, req.Platform)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
-			continue
+		plan := s.buildOpenAIAccountLoadPlan(req, filtered, loadMap)
+		candidateCount := plan.candidateCount
+		topK := plan.topK
+		loadSkew := plan.loadSkew
+		selectionOrder := plan.selectionOrder
+		if req.RequireCompact && len(plan.candidates) == 0 && len(plan.staleSnapshotCompactRetry) == 0 {
+			if retryWithFreshDB("compact_candidates_filtered_out") {
+				continue
+			}
+			return nil, 0, 0, 0, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, true, stats)
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability, req.Platform)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
-			continue
+		if req.RequireCompact && len(selectionOrder) == 0 && s.service.schedulerSnapshot == nil {
+			return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, true, stats)
 		}
-		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
-			compactBlocked = true
-			continue
+		if len(selectionOrder) == 0 {
+			if retryWithFreshDB("empty_selection_order") {
+				continue
+			}
+			return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, req.RequireCompact && len(plan.allCandidates) > 0, stats)
 		}
-		return &AccountSelectionResult{
-			Account: fresh,
-			WaitPlan: &AccountWaitPlan{
-				AccountID:      fresh.ID,
-				MaxConcurrency: fresh.Concurrency,
-				Timeout:        cfg.FallbackWaitTimeout,
-				MaxWaiting:     cfg.FallbackMaxWaiting,
-			},
-		}, candidateCount, topK, loadSkew, nil
-	}
 
-	return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked)
+		result, compactBlocked, acquireErr := s.tryAcquireOpenAISelectionOrder(ctx, req, selectionOrder, &stats)
+		if acquireErr != nil {
+			return nil, candidateCount, topK, loadSkew, acquireErr
+		}
+		if result != nil {
+			return result, candidateCount, topK, loadSkew, nil
+		}
+
+		if s.service.concurrencyService != nil {
+			if freshLoadMap, loadErr := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadReq); loadErr == nil {
+				freshPlan := s.buildOpenAIAccountLoadPlan(req, filtered, freshLoadMap)
+				if len(freshPlan.selectionOrder) > 0 {
+					freshResult, freshCompactBlocked, freshAcquireErr := s.tryAcquireOpenAISelectionOrder(ctx, req, freshPlan.selectionOrder, &stats)
+					if freshAcquireErr != nil {
+						return nil, candidateCount, topK, loadSkew, freshAcquireErr
+					}
+					if freshResult != nil {
+						return freshResult, freshPlan.candidateCount, freshPlan.topK, freshPlan.loadSkew, nil
+					}
+					compactBlocked = compactBlocked || freshCompactBlocked
+					selectionOrder = freshPlan.selectionOrder
+					candidateCount = freshPlan.candidateCount
+					topK = freshPlan.topK
+					loadSkew = freshPlan.loadSkew
+				}
+			}
+		}
+
+		cfg := s.service.schedulingConfig()
+		// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
+		for _, candidate := range selectionOrder {
+			fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.RequiredCapability, req.Platform)
+			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				stats.FreshRecheckRejected++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+				continue
+			}
+			fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability, req.Platform)
+			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				stats.FreshRecheckRejected++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+				continue
+			}
+			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+				compactBlocked = true
+				stats.CompactUnsupported++
+				stats.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(stats.SampleRejectedAccounts, candidate.account.ID)
+				continue
+			}
+			return &AccountSelectionResult{
+				Account: fresh,
+				WaitPlan: &AccountWaitPlan{
+					AccountID:      fresh.ID,
+					MaxConcurrency: fresh.Concurrency,
+					Timeout:        cfg.FallbackWaitTimeout,
+					MaxWaiting:     cfg.FallbackMaxWaiting,
+				},
+			}, candidateCount, topK, loadSkew, nil
+		}
+
+		if retryWithFreshDB("selection_order_rejected_by_fresh_recheck") {
+			continue
+		}
+		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionErrorWithStats(req.RequestedModel, compactBlocked, stats)
+	}
+}
+
+type openAIAccountSelectionFailureStats struct {
+	Total                  int
+	Eligible               int
+	Excluded               int
+	Unschedulable          int
+	RuntimeBlocked         int
+	PrivacyRequired        int
+	QuotaPaused            int
+	ModelUnsupported       int
+	ChannelRestricted      int
+	ProtocolUnsupported    int
+	CapabilityUnsupported  int
+	ImageUnsupported       int
+	TransportUnsupported   int
+	FreshRecheckRejected   int
+	CompactUnsupported     int
+	SlotAcquireMiss        int
+	FreshDBRetried         bool
+	FreshDBRetryReason     string
+	SampleRejectedAccounts []int64
+}
+
+func newOpenAIAccountSelectionFailureStats(accounts []Account, retriedFreshDB bool, freshDBRetryReason string) openAIAccountSelectionFailureStats {
+	return openAIAccountSelectionFailureStats{
+		Total:              len(accounts),
+		FreshDBRetried:     retriedFreshDB,
+		FreshDBRetryReason: strings.TrimSpace(freshDBRetryReason),
+	}
+}
+
+func (s *defaultOpenAIAccountScheduler) openAIAccountRequestIncompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) string {
+	if account == nil {
+		return "unschedulable"
+	}
+	if s != nil && s.service != nil && s.service.isOpenAIAccountRuntimeBlocked(account) {
+		return "runtime_blocked"
+	}
+	if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
+		return "quota_paused"
+	}
+	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		return "model_unsupported"
+	}
+	if req.GroupID != nil && s != nil && s.service != nil &&
+		s.service.needsUpstreamChannelRestrictionCheck(ctx, req.GroupID) &&
+		s.service.isUpstreamModelRestrictedByChannel(ctx, *req.GroupID, account, req.RequestedModel, req.RequireCompact) {
+		return "channel_restricted"
+	}
+	if !accountSupportsOpenAICapabilities(ctx, account, req.Platform, req.RequiredCapability, req.RequiredImageCapability, req.RequireCompact) {
+		return openAIAccountCapabilityFailureReason(ctx, account, req)
+	}
+	return ""
+}
+
+func openAIAccountCapabilityFailureReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) string {
+	if account == nil {
+		return "unschedulable"
+	}
+	platform := normalizeOpenAICompatiblePlatform(req.Platform)
+	if platform == PlatformGrok {
+		if !account.IsGrok() {
+			return "capability_unsupported"
+		}
+		if req.RequireCompact || req.RequiredImageCapability != "" {
+			return "capability_unsupported"
+		}
+		if req.RequiredCapability != "" && !isOpenAITextEndpointCapability(req.RequiredCapability) {
+			return "capability_unsupported"
+		}
+		if !accountMatchesRequestProtocol(ctx, account) {
+			return "protocol_unsupported"
+		}
+		return "capability_unsupported"
+	}
+	if !account.IsOpenAI() {
+		if req.RequireCompact {
+			return "capability_unsupported"
+		}
+		if req.RequiredImageCapability != "" {
+			return "image_unsupported"
+		}
+		if req.RequiredCapability != "" && !isOpenAITextEndpointCapability(req.RequiredCapability) {
+			return "capability_unsupported"
+		}
+		if !IsMessageProtocol(InboundProtocolFromContext(ctx)) || !accountMatchesRequestProtocol(ctx, account) {
+			return "protocol_unsupported"
+		}
+		return "capability_unsupported"
+	}
+	if !account.SupportsOpenAIEndpointCapability(req.RequiredCapability) {
+		return "capability_unsupported"
+	}
+	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
+		return "image_unsupported"
+	}
+	return "capability_unsupported"
+}
+
+func (s *openAIAccountSelectionFailureStats) Record(reason string, accountID int64) {
+	if s == nil {
+		return
+	}
+	switch reason {
+	case "excluded":
+		s.Excluded++
+	case "unschedulable":
+		s.Unschedulable++
+	case "runtime_blocked":
+		s.RuntimeBlocked++
+	case "privacy_required":
+		s.PrivacyRequired++
+	case "quota_paused":
+		s.QuotaPaused++
+	case "model_unsupported":
+		s.ModelUnsupported++
+	case "channel_restricted":
+		s.ChannelRestricted++
+	case "protocol_unsupported":
+		s.ProtocolUnsupported++
+	case "image_unsupported":
+		s.ImageUnsupported++
+	default:
+		s.CapabilityUnsupported++
+	}
+	s.SampleRejectedAccounts = appendOpenAISelectionFailureSampleID(s.SampleRejectedAccounts, accountID)
+}
+
+func appendOpenAISelectionFailureSampleID(samples []int64, id int64) []int64 {
+	const limit = 5
+	if id <= 0 || len(samples) >= limit {
+		return samples
+	}
+	return append(samples, id)
+}
+
+func noAvailableOpenAISelectionErrorWithStats(requestedModel string, compactBlocked bool, stats openAIAccountSelectionFailureStats) error {
+	err := noAvailableOpenAISelectionError(requestedModel, compactBlocked)
+	summary := summarizeOpenAISelectionFailureStats(stats)
+	if summary == "" {
+		return err
+	}
+	return fmt.Errorf("%w (%s)", err, summary)
+}
+
+func summarizeOpenAISelectionFailureStats(stats openAIAccountSelectionFailureStats) string {
+	parts := []string{
+		fmt.Sprintf("total=%d", stats.Total),
+		fmt.Sprintf("eligible=%d", stats.Eligible),
+		fmt.Sprintf("excluded=%d", stats.Excluded),
+		fmt.Sprintf("unschedulable=%d", stats.Unschedulable),
+		fmt.Sprintf("runtime_blocked=%d", stats.RuntimeBlocked),
+		fmt.Sprintf("privacy_required=%d", stats.PrivacyRequired),
+		fmt.Sprintf("quota_paused=%d", stats.QuotaPaused),
+		fmt.Sprintf("model_unsupported=%d", stats.ModelUnsupported),
+		fmt.Sprintf("channel_restricted=%d", stats.ChannelRestricted),
+		fmt.Sprintf("protocol_unsupported=%d", stats.ProtocolUnsupported),
+		fmt.Sprintf("capability_unsupported=%d", stats.CapabilityUnsupported),
+		fmt.Sprintf("image_unsupported=%d", stats.ImageUnsupported),
+		fmt.Sprintf("transport_unsupported=%d", stats.TransportUnsupported),
+		fmt.Sprintf("fresh_recheck_rejected=%d", stats.FreshRecheckRejected),
+		fmt.Sprintf("compact_unsupported=%d", stats.CompactUnsupported),
+		fmt.Sprintf("slot_acquire_miss=%d", stats.SlotAcquireMiss),
+	}
+	if stats.FreshDBRetried {
+		parts = append(parts, "fresh_db_retry=true")
+		if stats.FreshDBRetryReason != "" {
+			parts = append(parts, "fresh_db_retry_reason="+stats.FreshDBRetryReason)
+		}
+	}
+	if len(stats.SampleRejectedAccounts) > 0 {
+		parts = append(parts, fmt.Sprintf("sample_rejected_accounts=%v", stats.SampleRejectedAccounts))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Account, requiredTransport OpenAIUpstreamTransport) bool {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -287,6 +288,32 @@ func TestClassifyOpsRoutingCapacityMarkerExcludesMaskedSelectionFailureFromSLA(t
 	require.True(t, isBusinessLimited)
 	require.Equal(t, "platform", errorOwner)
 	require.Equal(t, "gateway", errorSource)
+}
+
+func TestMarkOpsRoutingCapacityLimitedIfNoAvailableStoresSchedulerDiagnostics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	err := errors.New("no available OpenAI accounts supporting model: mimo-v2.5-pro (total=1 eligible=0 protocol_unsupported=1 sample_rejected_accounts=[37042])")
+	markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+
+	require.True(t, isOpsRoutingCapacityLimited(c))
+	require.Equal(t, err.Error(), service.GetOpsSchedulerDiagnostics(c))
+}
+
+func TestApplyOpsSchedulerDiagnosticsDoesNotOverwriteUpstreamDetail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	service.SetOpsSchedulerDiagnosticsDetail(c, "no available OpenAI accounts supporting model: mimo-v2.5-pro (total=1 eligible=0 protocol_unsupported=1)")
+	upstreamDetail := "provider returned 502"
+	entry := &service.OpsInsertErrorLogInput{UpstreamErrorDetail: &upstreamDetail}
+
+	applyOpsSchedulerDiagnosticsFromContext(c, entry)
+
+	require.NotNil(t, entry.UpstreamErrorDetail)
+	require.Equal(t, upstreamDetail, *entry.UpstreamErrorDetail)
 }
 
 func TestClassifyOpsAuthClientErrorsExcludedFromSLA(t *testing.T) {

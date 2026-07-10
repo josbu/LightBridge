@@ -2206,6 +2206,11 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		}
 		return filterAccountsByRequestProtocol(ctx, accounts), nil
 	}
+	return s.listSchedulableAccountsFromDB(ctx, groupID, platform)
+}
+
+func (s *OpenAIGatewayService) listSchedulableAccountsFromDB(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+	platform = normalizeOpenAICompatiblePlatform(platform)
 	if platform != PlatformGrok && groupID != nil && IsMessageProtocol(InboundProtocolFromContext(ctx)) {
 		accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
 		if err != nil {
@@ -2257,14 +2262,27 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	fresh := account
 	if s.schedulerSnapshot != nil {
 		current, err := s.getSchedulableAccount(ctx, account.ID)
-		if err != nil || current == nil {
-			return nil
+		if err == nil && current != nil {
+			fresh = current
 		}
-		fresh = current
 	}
 
 	if !isOpenAIAccountEligibleForRequest(ctx, fresh, requestedModel, requireCompact, requiredCapability, platform) {
-		return nil
+		if s.schedulerSnapshot == nil || s.accountRepo == nil {
+			return nil
+		}
+		latest, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			return nil
+		}
+		if !isOpenAIAccountEligibleForRequest(ctx, latest, requestedModel, requireCompact, requiredCapability, platform) {
+			return nil
+		}
+		if s.isOpenAIAccountRuntimeBlocked(latest) {
+			return nil
+		}
+		_ = s.schedulerSnapshot.UpdateAccountInCache(ctx, latest)
+		return latest
 	}
 	if s.isOpenAIAccountRuntimeBlocked(fresh) {
 		return nil

@@ -266,6 +266,18 @@ func (s *openAISnapshotCacheStub) GetAccount(ctx context.Context, accountID int6
 	return &cloned, nil
 }
 
+func (s *openAISnapshotCacheStub) SetAccount(ctx context.Context, account *Account) error {
+	if account == nil {
+		return nil
+	}
+	if s.accountsByID == nil {
+		s.accountsByID = make(map[int64]*Account)
+	}
+	cloned := *account
+	s.accountsByID[account.ID] = &cloned
+	return nil
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -737,6 +749,79 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_MessagesDispatchSelects
 	require.Equal(t, int64(37041), selection.Account.ID)
 	require.Equal(t, "hub mimo", selection.Account.Name)
 	require.Equal(t, PlatformCustom, selection.Account.Platform)
+	require.Equal(t, CustomProtocolOpenAIResponses, selection.Account.CustomProtocol())
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, decision.CandidateCount)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_RetriesFreshDBWhenSnapshotCustomProtocolStale(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := WithInboundProtocol(context.Background(), CustomProtocolOpenAIResponses)
+	groupID := int64(10116)
+	staleSnapshot := &Account{
+		ID:          37042,
+		Name:        "hub mimo",
+		Platform:    PlatformCustom,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{
+			"openai_capabilities": []any{"responses"},
+			"model_mapping": map[string]any{
+				"mimo-v2.5-pro": "mimo-v2.5-pro",
+			},
+		},
+		Extra: map[string]any{},
+	}
+	freshDBAccount := *staleSnapshot
+	freshDBAccount.Extra = map[string]any{
+		"protocol": CustomProtocolOpenAIResponses,
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{freshDBAccount}},
+		cache:       &schedulerTestGatewayCache{},
+		cfg:         cfg,
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(
+			"true",
+		),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		schedulerSnapshot: NewSchedulerSnapshotService(
+			&openAISnapshotCacheStub{
+				snapshotAccounts: []*Account{staleSnapshot},
+				accountsByID: map[int64]*Account{
+					staleSnapshot.ID: staleSnapshot,
+				},
+			},
+			nil,
+			schedulerTestOpenAIAccountRepo{accounts: []Account{freshDBAccount}},
+			nil,
+			cfg,
+		),
+	}
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"mimo-v2.5-pro",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityResponses,
+		false,
+		PlatformOpenAI,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(37042), selection.Account.ID)
+	require.Equal(t, "hub mimo", selection.Account.Name)
 	require.Equal(t, CustomProtocolOpenAIResponses, selection.Account.CustomProtocol())
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.Equal(t, 1, decision.CandidateCount)

@@ -15,6 +15,7 @@ const (
 	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
 	OpsUpstreamErrorsKey       = "ops_upstream_errors"
+	OpsSchedulerDiagnosticsKey = "ops_scheduler_diagnostics"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -70,6 +71,27 @@ func HasOpsClientBusinessLimited(c *gin.Context) bool {
 	}
 	marked, _ := v.(bool)
 	return marked
+}
+
+func SetOpsSchedulerDiagnosticsDetail(c *gin.Context, detail string) {
+	if c == nil {
+		return
+	}
+	if detail = strings.TrimSpace(detail); detail != "" {
+		c.Set(OpsSchedulerDiagnosticsKey, detail)
+	}
+}
+
+func GetOpsSchedulerDiagnostics(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	v, ok := c.Get(OpsSchedulerDiagnosticsKey)
+	if !ok {
+		return ""
+	}
+	detail, _ := v.(string)
+	return strings.TrimSpace(detail)
 }
 
 // SetOpsUpstreamError is the exported wrapper for setOpsUpstreamError, used by

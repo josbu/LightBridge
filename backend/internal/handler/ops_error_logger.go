@@ -395,6 +395,9 @@ func markOpsRoutingCapacityLimitedIfNoAvailable(c *gin.Context, err error) {
 	if !isOpsNoAvailableAccountError(err) {
 		return
 	}
+	if err != nil {
+		service.SetOpsSchedulerDiagnosticsDetail(c, err.Error())
+	}
 	markOpsRoutingCapacityLimited(c)
 }
 
@@ -418,6 +421,20 @@ func isOpsNoAvailableAccountError(err error) bool {
 		return true
 	}
 	return isOpsNoAvailableAccountMessage(err.Error())
+}
+
+func applyOpsSchedulerDiagnosticsFromContext(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
+	if c == nil || entry == nil {
+		return
+	}
+	diagnostics := service.GetOpsSchedulerDiagnostics(c)
+	if diagnostics == "" {
+		return
+	}
+	if entry.UpstreamErrorDetail == nil || strings.TrimSpace(*entry.UpstreamErrorDetail) == "" {
+		detail := diagnostics
+		entry.UpstreamErrorDetail = &detail
+	}
 }
 
 type opsCaptureWriter struct {
@@ -688,6 +705,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
+			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, "api_error", recoveredMsg, "", effectiveStatus)
 
 			entry := &service.OpsInsertErrorLogInput{
 				RequestID:       requestID,
@@ -728,18 +746,18 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}(),
 				UserAgent: c.GetHeader("User-Agent"),
 
-				ErrorPhase:        classifyOpsPhase("api_error", recoveredMsg, ""),
+				ErrorPhase:        phase,
 				ErrorType:         "api_error",
 				Severity:          classifyOpsSeverity("api_error", effectiveStatus),
 				StatusCode:        effectiveStatus,
-				IsBusinessLimited: routingCapacityLimited,
+				IsBusinessLimited: isBusinessLimited,
 				IsCountTokens:     isCountTokensRequest(c),
 
 				ErrorMessage: recoveredMsg,
 				ErrorBody:    w.buf.String(),
 
-				ErrorSource: "gateway",
-				ErrorOwner:  "platform",
+				ErrorSource: errorSource,
+				ErrorOwner:  errorOwner,
 
 				UpstreamStatusCode:   upstreamStatusCode,
 				UpstreamErrorMessage: upstreamErrorMessage,
@@ -748,6 +766,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 				CreatedAt: time.Now(),
 			}
+			applyOpsSchedulerDiagnosticsFromContext(c, entry)
 			applyOpsLatencyFieldsFromContext(c, entry)
 
 			if apiKey != nil {
@@ -938,6 +957,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 			}
 		}
+		applyOpsSchedulerDiagnosticsFromContext(c, entry)
 
 		if apiKey != nil {
 			entry.APIKeyID = &apiKey.ID

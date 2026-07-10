@@ -95,7 +95,7 @@ func normalizeImportDataPayload(raw json.RawMessage) (DataPayload, error) {
 }
 
 func looksLikeLightBridgeData(payload DataPayload) bool {
-	if payload.Type == dataType || payload.Type == legacyDataType {
+	if payload.Type == dataType || payload.Type == legacyDataType || strings.ToLower(payload.Type) == authconvDataTypeAlias {
 		return true
 	}
 	return payload.Type == "" && payload.Accounts != nil

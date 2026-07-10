@@ -145,6 +145,16 @@
                       </span>
                       <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
                     </button>
+                    <button
+                      class="account-tools-menu-item disabled:cursor-not-allowed disabled:opacity-60"
+                      :disabled="repairingOpenAIOAuthPlatform"
+                      @click="handleRepairOpenAIOAuthPlatform"
+                    >
+                      <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        <Icon name="refresh" size="sm" :class="{ 'animate-spin': repairingOpenAIOAuthPlatform }" />
+                      </span>
+                      <span class="flex-1 text-left">{{ t('admin.accounts.repairOpenAIOAuthPlatform') }}</span>
+                    </button>
                     <button class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
                       <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200">
                         <Icon name="lock" size="sm" />
@@ -547,6 +557,7 @@ const exportingData = ref(false)
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
+const repairingOpenAIOAuthPlatform = ref(false)
 const hiddenColumns = reactive<Set<string>>(new Set())
 const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'rate_multiplier']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
@@ -1085,6 +1096,39 @@ const openErrorPassthrough = () => {
 const openTLSFingerprintProfiles = () => {
   closeAccountToolsDropdown()
   showTLSFingerprintProfiles.value = true
+}
+
+const handleRepairOpenAIOAuthPlatform = async () => {
+  closeAccountToolsDropdown()
+  if (repairingOpenAIOAuthPlatform.value) return
+  if (!confirm(t('admin.accounts.repairOpenAIOAuthPlatformConfirm'))) return
+
+  repairingOpenAIOAuthPlatform.value = true
+  try {
+    const result = await adminAPI.accounts.repairOpenAIOAuthPlatform()
+    if (result.failed > 0) {
+      appStore.showError(t('admin.accounts.repairOpenAIOAuthPlatformCompletedWithErrors', {
+        repaired: result.repaired,
+        failed: result.failed,
+        scanned: result.scanned
+      }))
+    } else if (result.repaired > 0) {
+      appStore.showSuccess(t('admin.accounts.repairOpenAIOAuthPlatformCompleted', {
+        repaired: result.repaired,
+        scanned: result.scanned
+      }))
+    } else {
+      appStore.showInfo(t('admin.accounts.repairOpenAIOAuthPlatformNoChanges', {
+        scanned: result.scanned
+      }))
+    }
+    await load()
+    usageManualRefreshToken.value += 1
+  } catch (error: any) {
+    appStore.showError(error?.response?.data?.message || error?.message || t('admin.accounts.repairOpenAIOAuthPlatformFailed'))
+  } finally {
+    repairingOpenAIOAuthPlatform.value = false
+  }
 }
 
 const syncPendingListChanges = async () => {

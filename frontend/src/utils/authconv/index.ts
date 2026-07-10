@@ -89,7 +89,7 @@ export function convertToPayload(
   )
 
   return {
-    type: 'lightbridge',
+    type: 'LightBridge-data',
     version: 1,
     exported_at: new Date().toISOString(),
     proxies: [],

@@ -587,6 +587,31 @@ export async function syncFromCrs(params: {
   return data
 }
 
+export interface RepairOpenAIOAuthPlatformItem {
+  account_id: number
+  name: string
+  action: 'repaired' | 'skipped' | 'failed'
+  reason?: string
+  error?: string
+}
+
+export interface RepairOpenAIOAuthPlatformResult {
+  scanned: number
+  candidates: number
+  repaired: number
+  skipped: number
+  failed: number
+  repaired_ids?: number[]
+  items: RepairOpenAIOAuthPlatformItem[]
+}
+
+export async function repairOpenAIOAuthPlatform(): Promise<RepairOpenAIOAuthPlatformResult> {
+  const { data } = await apiClient.post<RepairOpenAIOAuthPlatformResult>(
+    '/admin/accounts/repair/openai-oauth-platform'
+  )
+  return data
+}
+
 export async function exportData(options?: {
   ids?: number[]
   filters?: {
@@ -768,6 +793,7 @@ export const accountsAPI = {
   bulkUpdate,
   previewFromCrs,
   syncFromCrs,
+  repairOpenAIOAuthPlatform,
   exportData,
   importData,
   importCodexSession,

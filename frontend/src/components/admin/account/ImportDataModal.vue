@@ -14,13 +14,21 @@
       <div>
         <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
         <div
-          class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-800"
+          data-testid="account-data-dropzone"
+          class="flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors"
+          :class="isDragActive ? 'border-primary-400 bg-primary-50 dark:border-primary-500 dark:bg-primary-900/20' : 'border-gray-300 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'"
+          @dragenter.prevent="handleDragEnter"
+          @dragover.prevent="handleDragOver"
+          @dragleave.prevent="handleDragLeave"
+          @drop.prevent="handleDrop"
         >
           <div class="min-w-0">
             <div class="truncate text-sm text-gray-700 dark:text-dark-200">
               {{ fileLabel || t('admin.accounts.dataImportSelectFile') }}
             </div>
-            <div class="text-xs text-gray-500 dark:text-dark-400">JSON/JSONL/TXT/ZIP (.json, .jsonl, .txt, .zip)</div>
+            <div class="text-xs text-gray-500 dark:text-dark-400">
+              {{ isDragActive ? t('admin.accounts.dataImportDropFiles') : t('admin.accounts.dataImportFileTypes') }}
+            </div>
           </div>
           <button type="button" class="btn btn-secondary shrink-0" @click="openFilePicker">
             {{ t('common.chooseFile') }}
@@ -54,7 +62,7 @@
         <label class="input-label">{{ t('admin.accounts.dataImportFormatOverride') }}</label>
         <select v-model="manualFormatOverride" class="input">
           <option value="auto">{{ t('admin.accounts.dataImportFormatAuto') }}</option>
-          <option value="native">LightBridge Native</option>
+          <option value="native">{{ t('admin.accounts.dataImportFormatNative') }}</option>
           <option value="cpa">CPA</option>
           <option value="sub2api">sub2api</option>
           <option value="codex2api">codex2api</option>
@@ -221,6 +229,7 @@ const appStore = useAppStore()
 
 const importing = ref(false)
 const extracting = ref(false)
+const isDragActive = ref(false)
 const files = ref<File[]>([])
 const sourceURLs = ref('')
 const result = ref<AdminDataImportResult | null>(null)
@@ -288,6 +297,7 @@ watch(
       files.value = []
       sourceURLs.value = ''
       result.value = null
+      isDragActive.value = false
       resetImportProgress()
       resetFormatState()
       compatibilityMode.value = false
@@ -306,13 +316,12 @@ const openFilePicker = () => {
   fileInput.value?.click()
 }
 
-const handleFileChange = async (event: Event) => {
-  const target = event.target as HTMLInputElement
+const selectImportFiles = async (selectedFiles: File[]) => {
   extracting.value = true
   resetFormatState()
   try {
-    files.value = await expandSelectedImportFiles(Array.from(target.files || []))
-    if (target.files && target.files.length > 0 && files.value.length === 0) {
+    files.value = await expandSelectedImportFiles(selectedFiles)
+    if (selectedFiles.length > 0 && files.value.length === 0) {
       appStore.showError(t('admin.accounts.dataImportZipNoImportableFiles'))
     }
     // Detect format from first file
@@ -330,6 +339,40 @@ const handleFileChange = async (event: Event) => {
     appStore.showError(error?.message || t('admin.accounts.dataImportZipFailed'))
   } finally {
     extracting.value = false
+  }
+}
+
+const handleFileChange = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  await selectImportFiles(Array.from(target.files || []))
+}
+
+const handleDragEnter = (event: DragEvent) => {
+  if (event.dataTransfer?.types.includes('Files')) {
+    isDragActive.value = true
+  }
+}
+
+const handleDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const handleDragLeave = (event: DragEvent) => {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const relatedTarget = event.relatedTarget as Node | null
+  if (!currentTarget || !relatedTarget || !currentTarget.contains(relatedTarget)) {
+    isDragActive.value = false
+  }
+}
+
+const handleDrop = async (event: DragEvent) => {
+  isDragActive.value = false
+  if (importing.value || extracting.value) return
+  await selectImportFiles(Array.from(event.dataTransfer?.files || []))
+  if (fileInput.value) {
+    fileInput.value.value = ''
   }
 }
 

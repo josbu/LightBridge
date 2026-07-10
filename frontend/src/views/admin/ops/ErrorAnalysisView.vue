@@ -71,6 +71,15 @@
           <Icon name="download" size="sm" />
           <span>{{ exportingAll ? t('admin.ops.errorAnalysis.exporting') : t('admin.ops.errorAnalysis.exportAll') }}</span>
         </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          :disabled="loadingDetail || exportingSelected || !selectedDetail"
+          @click="handleExportSelected"
+        >
+          <Icon name="download" size="sm" />
+          <span>{{ exportingSelected ? t('admin.ops.errorAnalysis.exporting') : t('admin.ops.errorAnalysis.exportCurrent') }}</span>
+        </button>
         <button type="button" class="btn btn-secondary" :disabled="loadingList" @click="fetchRequestErrors({ keepSelection: false })">
           <Icon name="refresh" size="sm" :class="loadingList ? 'animate-spin' : ''" />
           <span>{{ t('common.refresh') }}</span>
@@ -419,6 +428,9 @@
                                 <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-dark-800">{{ diagnostic.account.platform }}</span>
                                 <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-dark-800">{{ diagnostic.account.status }}</span>
                               </div>
+                              <div class="mt-1 break-all font-mono text-[10px] text-gray-500 dark:text-gray-400">
+                                {{ accountRoutingSummary(diagnostic.account, selectedDetail) }}
+                              </div>
                             </div>
                             <div class="text-[11px] text-gray-500 dark:text-gray-400">
                               {{ formatAccountCapacity(diagnostic.account) }}
@@ -465,6 +477,25 @@
                       <span>{{ t(`admin.ops.errorAnalysis.suggestion.${key}`) }}</span>
                     </div>
                   </div>
+                </div>
+
+                <div v-if="hasPrimaryUpstreamFeedback" class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/10">
+                  <h3 class="text-sm font-bold text-amber-900 dark:text-amber-100">{{ t('admin.ops.errorAnalysis.upstreamFeedback') }}</h3>
+                  <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+                    <div class="rounded border border-amber-200 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/60">
+                      <div class="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">{{ t('admin.ops.errorAnalysis.upstreamStatusCode') }}</div>
+                      <div class="mt-1 break-all font-mono text-xs font-semibold text-amber-900 dark:text-amber-100">{{ selectedDetail?.upstream_status_code || '-' }}</div>
+                    </div>
+                    <div class="rounded border border-amber-200 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/60">
+                      <div class="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">{{ t('admin.ops.errorAnalysis.upstreamEndpoint') }}</div>
+                      <div class="mt-1 break-all font-mono text-xs font-semibold text-amber-900 dark:text-amber-100">{{ selectedDetail?.upstream_endpoint || '-' }}</div>
+                    </div>
+                    <div class="rounded border border-amber-200 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/60 md:col-span-2">
+                      <div class="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">{{ t('admin.ops.errorAnalysis.upstreamMessage') }}</div>
+                      <div class="mt-1 break-all text-xs font-semibold text-amber-900 dark:text-amber-100">{{ selectedDetail?.upstream_error_message || '-' }}</div>
+                    </div>
+                  </div>
+                  <pre v-if="primaryUpstreamFeedbackBody" class="mt-3 max-h-[260px] overflow-auto rounded-lg border border-amber-200 bg-white p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-dark-900 dark:text-amber-100"><code>{{ prettyJSON(primaryUpstreamFeedbackBody) }}</code></pre>
                 </div>
 
                 <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
@@ -522,6 +553,7 @@ import type { Account } from '@/types'
 import { formatDateTime } from './utils/opsFormatters'
 import {
   accountDisplayLabel,
+  accountRoutingSummary,
   buildErrorAnalysis,
   diagnoseSchedulerAccounts,
   shortErrorMessage,
@@ -529,8 +561,8 @@ import {
   type ErrorAnalysisAccountReason,
   type ErrorAnalysisStepState
 } from './utils/errorAnalysis'
-import { resolvePrimaryResponseBody } from './utils/errorDetailResponse'
-import { exportBatchErrorsTXT } from './utils/errorExport'
+import { resolvePrimaryResponseBody, resolveUpstreamPayload } from './utils/errorDetailResponse'
+import { exportBatchErrorsTXT, exportSingleErrorTXT } from './utils/errorExport'
 import type { ErrorExportData } from './utils/errorExport'
 
 const { t } = useI18n()
@@ -566,6 +598,7 @@ const showRaw = ref(false)
 const loadingSchedulerAccounts = ref(false)
 const schedulerAccounts = ref<Account[]>([])
 const exportingAll = ref(false)
+const exportingSelected = ref(false)
 
 let listFetchSeq = 0
 let detailFetchSeq = 0
@@ -594,14 +627,29 @@ const readStatusOptions = computed(() => [
 
 const analysis = computed(() => buildErrorAnalysis(selectedDetail.value, correlatedUpstreamErrors.value))
 const primaryResponseBody = computed(() => resolvePrimaryResponseBody(selectedDetail.value, 'request'))
-const schedulerAccountDiagnostics = computed<ErrorAnalysisAccountDiagnostic[]>(() => diagnoseSchedulerAccounts(schedulerAccounts.value, selectedDetail.value))
+const primaryUpstreamFeedbackBody = computed(() => resolveUpstreamPayload(selectedDetail.value))
+const hasPrimaryUpstreamFeedback = computed(() => {
+  const detail = selectedDetail.value
+  if (!detail) return false
+  return detail.upstream_status_code != null ||
+    !!String(detail.upstream_error_message || '').trim() ||
+    !!String(detail.upstream_error_detail || '').trim()
+})
+const schedulerAccountDiagnostics = computed<ErrorAnalysisAccountDiagnostic[]>(() => diagnoseSchedulerAccounts(
+  schedulerAccounts.value,
+  selectedDetail.value,
+  Date.now(),
+  analysis.value.schedulerGateDiagnostics
+))
 const availableSchedulerAccountCount = computed(() => schedulerAccountDiagnostics.value.filter((item) => item.available).length)
 
 const relayModeLabel = computed(() => {
   if (schedulerAccounts.value.length === 0) return ''
-  const mode = (schedulerAccounts.value[0].extra as Record<string, unknown> | undefined)?.relay_mode as string | undefined
-  if (!mode) return 'router'
-  return mode
+  const modes = new Set(schedulerAccounts.value.map((account) => {
+    const raw = (account.extra as Record<string, unknown> | undefined)?.relay_mode as string | undefined
+    return raw || 'router'
+  }))
+  return modes.size === 1 ? Array.from(modes)[0] : 'mixed'
 })
 
 const relayModeDisplay = computed(() => {
@@ -609,6 +657,7 @@ const relayModeDisplay = computed(() => {
   switch (mode) {
     case 'passthrough': return t('admin.ops.errorAnalysis.relayMode.passthrough')
     case 'full_passthrough': return t('admin.ops.errorAnalysis.relayMode.fullPassthrough')
+    case 'mixed': return t('admin.ops.errorAnalysis.relayMode.mixed')
     default: return t('admin.ops.errorAnalysis.relayMode.router')
   }
 })
@@ -857,6 +906,28 @@ async function handleExportAll() {
     appStore.showError(t('admin.ops.errorAnalysis.exportFailed'))
   } finally {
     exportingAll.value = false
+  }
+}
+
+function handleExportSelected() {
+  if (!selectedDetail.value) {
+    appStore.showError(t('admin.ops.errorAnalysis.exportEmpty'))
+    return
+  }
+  exportingSelected.value = true
+  try {
+    exportSingleErrorTXT({
+      detail: selectedDetail.value,
+      analysis: analysis.value,
+      schedulerDiagnostics: schedulerAccountDiagnostics.value,
+      upstreamErrors: correlatedUpstreamErrors.value,
+      version: appStore.currentVersion,
+    })
+    appStore.showSuccess(t('admin.ops.errorAnalysis.exportSuccess'))
+  } catch {
+    appStore.showError(t('admin.ops.errorAnalysis.exportFailed'))
+  } finally {
+    exportingSelected.value = false
   }
 }
 

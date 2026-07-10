@@ -100,6 +100,7 @@ type AdminService interface {
 	ForceAntigravityPrivacy(ctx context.Context, account *Account) string
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
+	RepairMisclassifiedOpenAIOAuthAccounts(ctx context.Context) (*RepairOpenAIOAuthPlatformResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 
 	// Proxy management
@@ -394,6 +395,27 @@ type BulkUpdateAccountsResult struct {
 	SuccessIDs []int64                   `json:"success_ids"`
 	FailedIDs  []int64                   `json:"failed_ids"`
 	Results    []BulkUpdateAccountResult `json:"results"`
+}
+
+// RepairOpenAIOAuthPlatformResult is the aggregated response for repairing
+// OpenAI OAuth accounts that were incorrectly persisted as Gemini OAuth.
+type RepairOpenAIOAuthPlatformResult struct {
+	Scanned     int                             `json:"scanned"`
+	Candidates  int                             `json:"candidates"`
+	Repaired    int                             `json:"repaired"`
+	Skipped     int                             `json:"skipped"`
+	Failed      int                             `json:"failed"`
+	RepairedIDs []int64                         `json:"repaired_ids,omitempty"`
+	Items       []RepairOpenAIOAuthPlatformItem `json:"items"`
+}
+
+// RepairOpenAIOAuthPlatformItem captures the repair decision for one account.
+type RepairOpenAIOAuthPlatformItem struct {
+	AccountID int64  `json:"account_id"`
+	Name      string `json:"name"`
+	Action    string `json:"action"` // repaired/skipped/failed
+	Reason    string `json:"reason,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type CreateProxyInput struct {
@@ -2576,6 +2598,129 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 		return nil, 0, err
 	}
 	return accounts, result.Total, nil
+}
+
+const accountExtraKeyOpenAIOAuthPlatformRepair = "openai_oauth_platform_repair"
+
+func (s *adminServiceImpl) RepairMisclassifiedOpenAIOAuthAccounts(ctx context.Context) (*RepairOpenAIOAuthPlatformResult, error) {
+	accounts, err := s.accountRepo.ListByPlatform(ctx, PlatformGemini)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RepairOpenAIOAuthPlatformResult{
+		RepairedIDs: make([]int64, 0),
+		Items:       make([]RepairOpenAIOAuthPlatformItem, 0),
+	}
+
+	for _, account := range accounts {
+		if account.Type != AccountTypeOAuth {
+			continue
+		}
+		result.Scanned++
+
+		matched, reason := isMisclassifiedOpenAIOAuthAccount(account)
+		if !matched {
+			result.Skipped++
+			result.Items = append(result.Items, RepairOpenAIOAuthPlatformItem{
+				AccountID: account.ID,
+				Name:      account.Name,
+				Action:    "skipped",
+				Reason:    reason,
+			})
+			continue
+		}
+
+		result.Candidates++
+		previousPlatform := account.Platform
+		previousSubPlatform := account.SubPlatform
+		previousType := account.Type
+
+		account.Platform = PlatformOpenAI
+		account.SubPlatform = ""
+		account.Type = AccountTypeOAuth
+		account.Extra = cloneStringAnyMap(account.Extra)
+		account.Extra[accountExtraKeyOpenAIOAuthPlatformRepair] = map[string]any{
+			"repaired_at":           time.Now().UTC().Format(time.RFC3339),
+			"previous_platform":     previousPlatform,
+			"previous_sub_platform": previousSubPlatform,
+			"previous_type":         previousType,
+			"reason":                reason,
+		}
+
+		if err := s.accountRepo.Update(ctx, &account); err != nil {
+			result.Failed++
+			result.Items = append(result.Items, RepairOpenAIOAuthPlatformItem{
+				AccountID: account.ID,
+				Name:      account.Name,
+				Action:    "failed",
+				Reason:    reason,
+				Error:     err.Error(),
+			})
+			continue
+		}
+
+		result.Repaired++
+		result.RepairedIDs = append(result.RepairedIDs, account.ID)
+		result.Items = append(result.Items, RepairOpenAIOAuthPlatformItem{
+			AccountID: account.ID,
+			Name:      account.Name,
+			Action:    "repaired",
+			Reason:    reason,
+		})
+	}
+
+	return result, nil
+}
+
+func isMisclassifiedOpenAIOAuthAccount(account Account) (bool, string) {
+	if account.Platform != PlatformGemini {
+		return false, "account is not a Gemini account"
+	}
+	if account.Type != AccountTypeOAuth {
+		return false, "account is not an OAuth account"
+	}
+	if hasOpenAIOAuthCredentialIndicators(account.Credentials) {
+		return true, "credentials contain OpenAI OAuth markers"
+	}
+	if hasOpenAIOAuthCredentialIndicators(account.Extra) {
+		return true, "extra contains OpenAI OAuth markers"
+	}
+	if hasOpenAIOAuthCredentialIndicators(mergeStringAnyMaps(account.Extra, account.Credentials)) {
+		return true, "credentials and extra contain OpenAI OAuth markers"
+	}
+	if account.SubPlatform == SubPlatformAntigravity {
+		return false, "Antigravity OAuth account without OpenAI markers"
+	}
+	return false, "no OpenAI OAuth markers found"
+}
+
+func cloneStringAnyMap(input map[string]any) map[string]any {
+	if input == nil {
+		return map[string]any{}
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
+}
+
+func mergeStringAnyMaps(inputs ...map[string]any) map[string]any {
+	size := 0
+	for _, input := range inputs {
+		size += len(input)
+	}
+	if size == 0 {
+		return nil
+	}
+	output := make(map[string]any, size)
+	for _, input := range inputs {
+		for key, value := range input {
+			output[key] = value
+		}
+	}
+	return output
 }
 
 func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, error) {

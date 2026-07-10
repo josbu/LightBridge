@@ -1206,6 +1206,24 @@ func TestAPIContracts(t *testing.T) {
 				}
 			}`,
 		},
+		{
+			name:       "POST /api/v1/admin/accounts/repair/openai-oauth-platform",
+			method:     http.MethodPost,
+			path:       "/api/v1/admin/accounts/repair/openai-oauth-platform",
+			wantStatus: http.StatusOK,
+			wantJSON: `{
+				"code": 0,
+				"message": "success",
+				"data": {
+					"scanned": 0,
+					"candidates": 0,
+					"repaired": 0,
+					"skipped": 0,
+					"failed": 0,
+					"items": []
+				}
+			}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1342,6 +1360,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	v1Admin.Use(adminAuth)
 	v1Admin.GET("/settings", adminSettingHandler.GetSettings)
 	v1Admin.POST("/accounts/bulk-update", adminAccountHandler.BulkUpdate)
+	v1Admin.POST("/accounts/repair/openai-oauth-platform", adminAccountHandler.RepairOpenAIOAuthPlatform)
 
 	return &contractDeps{
 		now:         now,
@@ -1677,7 +1696,7 @@ func (s *stubAccountRepo) ListActive(ctx context.Context) ([]service.Account, er
 }
 
 func (s *stubAccountRepo) ListByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
-	return nil, errors.New("not implemented")
+	return []service.Account{}, nil
 }
 
 func (s *stubAccountRepo) UpdateLastUsed(ctx context.Context, id int64) error {

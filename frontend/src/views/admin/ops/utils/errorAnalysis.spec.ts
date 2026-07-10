@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { OpsErrorDetail } from '@/api/admin/ops'
 import type { Account } from '@/types'
-import { buildErrorAnalysis, diagnoseSchedulerAccount } from './errorAnalysis'
+import { buildErrorAnalysis, diagnoseSchedulerAccount, parseSchedulerGateDiagnostics } from './errorAnalysis'
+import { buildSingleErrorTXT } from './errorExport'
 
 function makeDetail(overrides: Partial<OpsErrorDetail> = {}): OpsErrorDetail {
   return {
@@ -79,6 +80,77 @@ describe('buildErrorAnalysis', () => {
     expect(analysis.steps.find((step) => step.key === 'provider_adapter')?.state).toBe('skipped')
     expect(analysis.steps.find((step) => step.key === 'upstream')?.state).toBe('skipped')
     expect(analysis.suggestionKeys).toContain('customNoUpstreamAttempt')
+  })
+
+  it('parses scheduler gate diagnostics and exposes the exact blocking gate', () => {
+    const detail = makeDetail({
+      message: 'Service temporarily unavailable',
+      error_body: '{"error":{"message":"Service temporarily unavailable"}}',
+      upstream_error_detail: 'no available OpenAI accounts supporting model: mimo-v2.5-pro (total=1 eligible=0 excluded=0 unschedulable=0 runtime_blocked=0 privacy_required=0 quota_paused=0 model_unsupported=0 channel_restricted=0 protocol_unsupported=1 capability_unsupported=0 image_unsupported=0 transport_unsupported=0 fresh_db_retry=true fresh_db_retry_reason=snapshot_accounts_filtered_out sample_rejected_accounts=[37042])',
+      requested_model: 'mimo-v2.5-pro',
+      platform: 'custom'
+    })
+
+    const diagnostics = parseSchedulerGateDiagnostics(detail)
+    expect(diagnostics?.primaryGate).toBe('protocol_unsupported')
+    expect(diagnostics?.counts.protocol_unsupported).toBe(1)
+    expect(diagnostics?.freshDBRetry).toBe(true)
+    expect(diagnostics?.freshDBRetryReason).toBe('snapshot_accounts_filtered_out')
+    expect(diagnostics?.sampleRejectedAccounts).toEqual(['37042'])
+
+    const analysis = buildErrorAnalysis(detail, [])
+    const schedulerStep = analysis.steps.find((step) => step.key === 'account_scheduler')
+
+    expect(analysis.rootCause).toBe('no_available_account')
+    expect(analysis.schedulerGateDiagnostics?.primaryGate).toBe('protocol_unsupported')
+    expect(schedulerStep?.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'scheduler_gate_primary', value: 'protocol_unsupported' }),
+      expect.objectContaining({ key: 'scheduler_gate_counts', value: expect.stringContaining('protocol_unsupported=1') })
+    ]))
+    expect(analysis.suggestionKeys).toContain('customCheckProtocol')
+  })
+
+  it('exports scheduler gate diagnostics into the TXT report', () => {
+    const detail = makeDetail({
+      upstream_error_detail: 'no available OpenAI accounts supporting model: mimo-v2.5-pro (total=1 eligible=0 excluded=0 unschedulable=0 runtime_blocked=0 privacy_required=0 quota_paused=0 model_unsupported=0 channel_restricted=0 protocol_unsupported=1 capability_unsupported=0 image_unsupported=0 transport_unsupported=0 sample_rejected_accounts=[37042])',
+      requested_model: 'mimo-v2.5-pro'
+    })
+    const analysis = buildErrorAnalysis(detail, [])
+    const txt = buildSingleErrorTXT({ detail, analysis })
+
+    expect(txt).toContain('调度器 Gate 诊断')
+    expect(txt).toContain('主阻断门: protocol_unsupported')
+    expect(txt).toContain('protocol_unsupported=1')
+    expect(txt).toContain('样例拒绝账号: 37042')
+  })
+
+  it('exports primary and correlated upstream error feedback into the TXT report', () => {
+    const detail = makeDetail({
+      phase: 'upstream',
+      status_code: 502,
+      upstream_status_code: 429,
+      upstream_endpoint: 'https://upstream.example/v1/responses',
+      upstream_error_message: 'rate limit from upstream',
+      upstream_error_detail: '{"error":{"message":"provider quota exceeded"}}'
+    })
+    const upstream = makeDetail({
+      id: 2,
+      status_code: 503,
+      account_name: 'hub mimo',
+      upstream_status_code: 503,
+      upstream_endpoint: 'https://upstream.example/v1/responses',
+      upstream_error_message: 'provider overloaded',
+      upstream_error_detail: '{"error":{"message":"overloaded"}}'
+    })
+    const analysis = buildErrorAnalysis(detail, [upstream])
+    const txt = buildSingleErrorTXT({ detail, analysis, upstreamErrors: [upstream] })
+
+    expect(txt).toContain('上游错误反馈')
+    expect(txt).toContain('上游错误详情:')
+    expect(txt).toContain('provider quota exceeded')
+    expect(txt).toContain('上游尝试记录')
+    expect(txt).toContain('provider overloaded')
+    expect(txt).toContain('hub mimo')
   })
 
   it('classifies 403 auth phase as auth failure', () => {
@@ -160,5 +232,70 @@ describe('buildErrorAnalysis', () => {
 
     expect(diagnostic.available).toBe(true)
     expect(diagnostic.reasons.map((reason) => reason.key)).not.toContain('platform_mismatch')
+  })
+
+  it('does not mark router-mode OpenAI Responses custom accounts as protocol blockers for Chat ingress', () => {
+    const detail = makeDetail({
+      group_id: 7,
+      inbound_endpoint: '/v1/chat/completions',
+      requested_model: 'mimo-v2.5-pro'
+    })
+    const diagnostic = diagnoseSchedulerAccount(makeAccount({
+      name: 'hub mimo',
+      platform: 'custom' as any,
+      extra: {
+        protocol: 'openai_responses',
+        relay_mode: 'router',
+        model_whitelist: ['mimo-v2.5-pro']
+      }
+    }), detail)
+
+    expect(diagnostic.available).toBe(true)
+    expect(diagnostic.reasons.map((reason) => reason.key)).not.toContain('protocol_passthrough_mismatch')
+    expect(diagnostic.reasons.map((reason) => reason.key)).not.toContain('protocol_conversion_missing')
+  })
+
+  it('marks passthrough protocol mismatch as the exact account-level blocker', () => {
+    const detail = makeDetail({
+      group_id: 7,
+      inbound_endpoint: '/v1/chat/completions',
+      requested_model: 'mimo-v2.5-pro'
+    })
+    const diagnostic = diagnoseSchedulerAccount(makeAccount({
+      name: 'hub mimo',
+      platform: 'custom' as any,
+      extra: {
+        protocol: 'openai_responses',
+        relay_mode: 'passthrough',
+        model_whitelist: ['mimo-v2.5-pro']
+      }
+    }), detail)
+
+    expect(diagnostic.available).toBe(false)
+    expect(diagnostic.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'protocol_passthrough_mismatch' })
+    ]))
+  })
+
+  it('maps scheduler rejected samples back to the concrete account card', () => {
+    const detail = makeDetail({
+      upstream_error_detail: 'no available OpenAI accounts supporting model: mimo-v2.5-pro (total=1 eligible=1 fresh_recheck_rejected=1 slot_acquire_miss=0 sample_rejected_accounts=[42])',
+      requested_model: 'mimo-v2.5-pro'
+    })
+    const analysis = buildErrorAnalysis(detail, [])
+    const diagnostic = diagnoseSchedulerAccount(makeAccount({
+      id: 42,
+      name: 'hub mimo',
+      platform: 'custom' as any,
+      extra: {
+        protocol: 'openai_responses',
+        relay_mode: 'router',
+        model_whitelist: ['mimo-v2.5-pro']
+      }
+    }), detail, Date.now(), analysis.schedulerGateDiagnostics)
+
+    expect(analysis.schedulerGateDiagnostics?.primaryGate).toBe('fresh_recheck_rejected')
+    expect(diagnostic.available).toBe(false)
+    expect(diagnostic.reasons.map((reason) => reason.key)).toContain('fresh_recheck_rejected')
   })
 })

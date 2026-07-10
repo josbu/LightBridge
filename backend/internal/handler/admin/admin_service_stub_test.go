@@ -416,6 +416,12 @@ func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *servic
 	return &service.BulkUpdateAccountsResult{Success: len(input.AccountIDs), Failed: 0, SuccessIDs: input.AccountIDs}, nil
 }
 
+func (s *stubAdminService) RepairMisclassifiedOpenAIOAuthAccounts(ctx context.Context) (*service.RepairOpenAIOAuthPlatformResult, error) {
+	return &service.RepairOpenAIOAuthPlatformResult{
+		Items: []service.RepairOpenAIOAuthPlatformItem{},
+	}, nil
+}
+
 func (s *stubAdminService) CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error {
 	s.lastMixedCheck.accountID = currentAccountID
 	s.lastMixedCheck.platform = currentAccountPlatform

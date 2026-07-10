@@ -42,6 +42,34 @@ export interface ErrorAnalysisResult {
   steps: ErrorAnalysisStep[]
   evidence: ErrorAnalysisEvidence[]
   suggestionKeys: string[]
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
+}
+
+export type SchedulerGateKey =
+  | 'excluded'
+  | 'unschedulable'
+  | 'runtime_blocked'
+  | 'privacy_required'
+  | 'quota_paused'
+  | 'model_unsupported'
+  | 'channel_restricted'
+  | 'protocol_unsupported'
+  | 'capability_unsupported'
+  | 'image_unsupported'
+  | 'transport_unsupported'
+  | 'fresh_recheck_rejected'
+  | 'compact_unsupported'
+  | 'slot_acquire_miss'
+
+export interface SchedulerGateDiagnostics {
+  raw: string
+  total?: number
+  eligible?: number
+  counts: Partial<Record<SchedulerGateKey, number>>
+  primaryGate?: SchedulerGateKey
+  freshDBRetry?: boolean
+  freshDBRetryReason?: string
+  sampleRejectedAccounts: string[]
 }
 
 export type ErrorAnalysisAccountReasonKey =
@@ -73,6 +101,13 @@ export type ErrorAnalysisAccountReasonKey =
   | 'channel_restricted'
   | 'window_cost_exceeded'
   | 'credentials_missing'
+  | 'protocol_missing'
+  | 'protocol_passthrough_mismatch'
+  | 'protocol_conversion_missing'
+  | 'scheduler_rejected_sample'
+  | 'fresh_recheck_rejected'
+  | 'compact_unsupported'
+  | 'slot_acquire_miss'
 
 export interface ErrorAnalysisAccountReason {
   key: ErrorAnalysisAccountReasonKey
@@ -104,10 +139,34 @@ interface RecordedSchedulerDiagnostics {
   accounts?: RecordedSchedulerAccountDiagnostic[]
 }
 
-const NO_AVAILABLE_ACCOUNT_RE = /no\s+available\s+accounts?|无可用账号/i
+const NO_AVAILABLE_ACCOUNT_RE = /no\s+available(?:\s+[a-z]+)*\s+accounts?|无可用账号/i
 const MODULE_PROVIDER_RE = /module provider|provider registry|provider id|adapter/i
 const NETWORK_RE = /timeout|deadline|connection refused|connection reset|dial tcp|tls|dns|network/i
 const SCHEDULER_DIAGNOSTICS_RE = /scheduler_diagnostics=([A-Za-z0-9_-]+)/
+const SCHEDULER_PAIR_RE = /([a-z_]+)=((?:\[[^\]]*\])|[^\s),]+)/g
+const SCHEDULER_GATE_KEYS: SchedulerGateKey[] = [
+  'excluded',
+  'unschedulable',
+  'runtime_blocked',
+  'privacy_required',
+  'quota_paused',
+  'model_unsupported',
+  'channel_restricted',
+  'protocol_unsupported',
+  'capability_unsupported',
+  'image_unsupported',
+  'transport_unsupported',
+  'fresh_recheck_rejected',
+  'compact_unsupported',
+  'slot_acquire_miss'
+]
+
+const MESSAGE_PROTOCOLS = [
+  'openai_responses',
+  'openai_chat_completions',
+  'anthropic_messages',
+  'gemini'
+] as const
 
 function textOf(detail: OpsErrorDetail | OpsErrorLog | null | undefined): string {
   if (!detail) return ''
@@ -118,6 +177,122 @@ function textOf(detail: OpsErrorDetail | OpsErrorLog | null | undefined): string
     'upstream_error_detail' in detail ? detail.upstream_error_detail : '',
     'upstream_errors' in detail ? detail.upstream_errors : ''
   ].filter(Boolean).join('\n')
+}
+
+function schedulerTextOf(detail: OpsErrorDetail | OpsErrorLog | null | undefined): string {
+  if (!detail) return ''
+  const parts = [
+    detail.message,
+    'upstream_error_message' in detail ? detail.upstream_error_message : '',
+    'upstream_error_detail' in detail ? detail.upstream_error_detail : '',
+    'error_body' in detail ? detail.error_body : ''
+  ].filter(Boolean).map(String)
+
+  const rawUpstreamErrors = 'upstream_errors' in detail ? detail.upstream_errors : ''
+  if (rawUpstreamErrors) {
+    parts.push(String(rawUpstreamErrors))
+    try {
+      const events = JSON.parse(String(rawUpstreamErrors))
+      if (Array.isArray(events)) {
+        for (const event of events) {
+          if (event && typeof event === 'object') {
+            parts.push(String((event as Record<string, unknown>).message ?? ''))
+            parts.push(String((event as Record<string, unknown>).detail ?? ''))
+          }
+        }
+      }
+    } catch {
+      // Raw upstream_errors is still included above.
+    }
+  }
+  return parts.filter(Boolean).join('\n')
+}
+
+function schedulerDiagnosticRaw(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  const lines = trimmed.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+  const diagnosticLine = lines.find((line) => /(?:total|eligible|model_unsupported|protocol_unsupported|capability_unsupported)=/i.test(line))
+  const raw = diagnosticLine || trimmed
+  return raw.length > 1200 ? `${raw.slice(0, 1197)}...` : raw
+}
+
+function parseNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value.replace(/[^\d.-]/g, ''))
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function parseBool(value: string | undefined): boolean | undefined {
+  if (!value) return undefined
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  return undefined
+}
+
+function parseSampleAccounts(value: string | undefined): string[] {
+  if (!value) return []
+  return value
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function primarySchedulerGate(counts: Partial<Record<SchedulerGateKey, number>>): SchedulerGateKey | undefined {
+  let best: SchedulerGateKey | undefined
+  let bestCount = 0
+  for (const key of SCHEDULER_GATE_KEYS) {
+    const count = counts[key] ?? 0
+    if (count > bestCount) {
+      best = key
+      bestCount = count
+    }
+  }
+  return best
+}
+
+export function parseSchedulerGateDiagnostics(detail: OpsErrorDetail | OpsErrorLog | null | undefined): SchedulerGateDiagnostics | undefined {
+  const text = schedulerTextOf(detail)
+  if (!text || !/(?:total|eligible|model_unsupported|protocol_unsupported|capability_unsupported)=/i.test(text)) {
+    return undefined
+  }
+
+  const pairs: Record<string, string> = {}
+  for (const match of text.matchAll(SCHEDULER_PAIR_RE)) {
+    pairs[match[1]] = match[2]
+  }
+  const counts: Partial<Record<SchedulerGateKey, number>> = {}
+  for (const key of SCHEDULER_GATE_KEYS) {
+    const value = parseNumber(pairs[key])
+    if (value != null) counts[key] = value
+  }
+  const hasGateCount = SCHEDULER_GATE_KEYS.some((key) => counts[key] != null)
+  if (!hasGateCount) return undefined
+
+  return {
+    raw: schedulerDiagnosticRaw(text),
+    total: parseNumber(pairs.total),
+    eligible: parseNumber(pairs.eligible),
+    counts,
+    primaryGate: primarySchedulerGate(counts),
+    freshDBRetry: parseBool(pairs.fresh_db_retry),
+    freshDBRetryReason: pairs.fresh_db_retry_reason,
+    sampleRejectedAccounts: parseSampleAccounts(pairs.sample_rejected_accounts)
+  }
+}
+
+export function formatSchedulerGateCounts(diagnostics: SchedulerGateDiagnostics): string {
+  const parts: string[] = []
+  if (diagnostics.total != null) parts.push(`total=${diagnostics.total}`)
+  if (diagnostics.eligible != null) parts.push(`eligible=${diagnostics.eligible}`)
+  for (const key of SCHEDULER_GATE_KEYS) {
+    const count = diagnostics.counts[key]
+    if (count != null) parts.push(`${key}=${count}`)
+  }
+  return parts.join(' ')
 }
 
 function normalize(value: unknown): string {
@@ -207,6 +382,7 @@ function isCustomProviderContext(detail: OpsErrorDetail | null, upstreamErrors: 
 
 function determineRootCause(detail: OpsErrorDetail | null, upstreamErrors: OpsErrorDetail[]): ErrorAnalysisRootCause {
   if (!detail) return 'unknown'
+  if (parseSchedulerGateDiagnostics(detail)) return 'no_available_account'
 
   const phase = normalize(detail.phase)
   const owner = normalize(detail.error_owner)
@@ -303,10 +479,163 @@ function requestedModelLabel(detail: OpsErrorDetail | null): string {
   return String(detail.requested_model || detail.model || detail.upstream_model || '').trim()
 }
 
+function extraOf(account: Account): Record<string, unknown> {
+  return (account.extra as Record<string, unknown> | undefined) ?? {}
+}
+
+function credentialsOf(account: Account): Record<string, unknown> {
+  return (account.credentials as Record<string, unknown> | undefined) ?? {}
+}
+
+function stringFromRecord(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeProtocol(value: string): string {
+  switch (value.trim()) {
+    case 'openai-chat':
+    case 'openai-chat-completions':
+      return 'openai_chat_completions'
+    case 'openai-responses':
+      return 'openai_responses'
+    case 'openai-embeddings':
+      return 'openai_embeddings'
+    case 'anthropic':
+      return 'anthropic_messages'
+    default:
+      return value.trim()
+  }
+}
+
+function isMessageProtocol(protocol: string): boolean {
+  return (MESSAGE_PROTOCOLS as readonly string[]).includes(protocol)
+}
+
+export function inferInboundProtocol(detail: OpsErrorDetail | null): string {
+  const endpoint = normalize(detail?.inbound_endpoint || detail?.request_path || '')
+  if (!endpoint) return ''
+  if (endpoint.includes('/chat/completions')) return 'openai_chat_completions'
+  if (endpoint.includes('/responses')) return 'openai_responses'
+  if (endpoint.includes('/messages')) return 'anthropic_messages'
+  if (endpoint.includes(':generatecontent') || endpoint.includes(':streamgeneratecontent') || endpoint.includes('/models/')) return 'gemini'
+  return ''
+}
+
+export function accountRelayMode(account: Account): string {
+  const extra = extraOf(account)
+  const explicit = stringFromRecord(extra, 'relay_mode').toLowerCase()
+  if (explicit === 'passthrough' || explicit === 'full_passthrough' || explicit === 'router') return explicit
+  if ((account.platform === 'openai' && (extra.openai_passthrough || extra.openai_oauth_passthrough)) ||
+    (account.platform === 'anthropic' && account.type === 'apikey' && extra.anthropic_passthrough)) {
+    return 'full_passthrough'
+  }
+  return 'router'
+}
+
+export function accountTargetProtocol(account: Account): string {
+  const extra = extraOf(account)
+  const credentials = credentialsOf(account)
+  if (account.platform === 'custom') {
+    return normalizeProtocol(String(account.protocol || stringFromRecord(extra, 'protocol') || stringFromRecord(credentials, 'protocol') || ''))
+  }
+  if (account.platform === 'grok') return 'openai_responses'
+  if (account.platform === 'openai') return 'openai_responses'
+  if (account.platform === 'anthropic') return 'anthropic_messages'
+  if (account.platform === 'antigravity') return 'gemini'
+  if (account.platform === 'gemini') return 'gemini'
+  return ''
+}
+
+function accountSupportedTargetProtocols(account: Account): string[] {
+  if (account.platform === 'custom') {
+    const protocol = accountTargetProtocol(account)
+    return protocol ? [protocol] : []
+  }
+  if (account.platform === 'antigravity') return ['anthropic_messages', 'gemini']
+  if (account.platform === 'grok') return ['openai_responses']
+  if (account.platform === 'openai') return ['openai_responses', 'openai_chat_completions', 'openai_embeddings']
+  if (account.platform === 'anthropic') return ['anthropic_messages']
+  if (account.platform === 'gemini') return ['gemini']
+  return []
+}
+
+function routePairImplemented(inbound: string, target: string): boolean {
+  if (inbound === target) return true
+  switch (inbound) {
+    case 'anthropic_messages':
+    case 'openai_chat_completions':
+    case 'openai_responses':
+    case 'gemini':
+      return target === 'anthropic_messages' ||
+        target === 'openai_responses' ||
+        target === 'openai_chat_completions' ||
+        target === 'gemini'
+    default:
+      return false
+  }
+}
+
+function preferredTargetProtocol(account: Account, supported: string[], inbound: string): string {
+  if (inbound && supported.includes(inbound)) return inbound
+  const target = accountTargetProtocol(account)
+  if (target && supported.includes(target)) return target
+  return supported.find(Boolean) || ''
+}
+
+function protocolDecision(account: Account, inboundProtocol: string): { ok: boolean; target?: string; chain?: string[]; reason?: ErrorAnalysisAccountReasonKey; detail?: string } {
+  const supported = accountSupportedTargetProtocols(account)
+  const relayMode = accountRelayMode(account)
+  if (!inboundProtocol) return { ok: true, target: preferredTargetProtocol(account, supported, '') }
+  if (supported.length === 0) {
+    return account.platform === 'custom'
+      ? { ok: false, reason: 'protocol_missing', detail: inboundProtocol }
+      : { ok: true }
+  }
+
+  if (relayMode === 'passthrough' || relayMode === 'full_passthrough') {
+    if (!supported.includes(inboundProtocol)) {
+      return {
+        ok: false,
+        reason: 'protocol_passthrough_mismatch',
+        detail: `${inboundProtocol} -> ${supported.join(', ')}`
+      }
+    }
+    return { ok: true, target: inboundProtocol, chain: [inboundProtocol] }
+  }
+
+  const target = preferredTargetProtocol(account, supported, inboundProtocol)
+  if (!isMessageProtocol(inboundProtocol) || !isMessageProtocol(target) || !routePairImplemented(inboundProtocol, target)) {
+    return {
+      ok: false,
+      target,
+      reason: 'protocol_conversion_missing',
+      detail: `${inboundProtocol} -> ${target || supported.join(', ')}`
+    }
+  }
+  return {
+    ok: true,
+    target,
+    chain: inboundProtocol === target ? [inboundProtocol] : inboundProtocol === 'openai_responses' || target === 'openai_responses'
+      ? [inboundProtocol, target]
+      : [inboundProtocol, 'openai_responses', target]
+  }
+}
+
+export function accountRoutingSummary(account: Account, detail: OpsErrorDetail | null): string {
+  const inbound = inferInboundProtocol(detail) || '-'
+  const relayMode = accountRelayMode(account)
+  const supported = accountSupportedTargetProtocols(account)
+  const decision = protocolDecision(account, inferInboundProtocol(detail))
+  const chain = decision.chain?.length ? decision.chain.join(' -> ') : decision.target || supported.join(', ') || '-'
+  return `inbound=${inbound} relay=${relayMode} supported=${supported.join(', ') || '-'} route=${chain}`
+}
+
 function buildStepEvidence(
   key: ErrorAnalysisStepKey,
   detail: OpsErrorDetail | null,
-  upstreamErrors: OpsErrorDetail[]
+  upstreamErrors: OpsErrorDetail[],
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
 ): ErrorAnalysisEvidence[] {
   const evidence: ErrorAnalysisEvidence[] = []
   if (!detail) return evidence
@@ -331,6 +660,21 @@ function buildStepEvidence(
       pushEvidence(evidence, 'account', detail.account_name || detail.account_id || 'none', detail.account_id ? 'neutral' : 'warning')
       pushEvidence(evidence, 'status', detail.status_code, detail.status_code >= 500 ? 'danger' : 'warning')
       if (hasNoAvailableAccount(detail)) pushEvidence(evidence, 'scheduler_result', 'No available accounts', 'danger')
+      if (schedulerGateDiagnostics?.primaryGate) {
+        pushEvidence(evidence, 'scheduler_gate_primary', schedulerGateDiagnostics.primaryGate, 'danger')
+      }
+      if (schedulerGateDiagnostics) {
+        pushEvidence(evidence, 'scheduler_gate_counts', formatSchedulerGateCounts(schedulerGateDiagnostics), 'danger')
+      }
+      if (schedulerGateDiagnostics?.freshDBRetry != null) {
+        const retry = schedulerGateDiagnostics.freshDBRetry
+          ? `true${schedulerGateDiagnostics.freshDBRetryReason ? ` (${schedulerGateDiagnostics.freshDBRetryReason})` : ''}`
+          : 'false'
+        pushEvidence(evidence, 'scheduler_fresh_db_retry', retry, schedulerGateDiagnostics.freshDBRetry ? 'warning' : 'neutral')
+      }
+      if (schedulerGateDiagnostics?.sampleRejectedAccounts.length) {
+        pushEvidence(evidence, 'scheduler_rejected_samples', schedulerGateDiagnostics.sampleRejectedAccounts.join(', '), 'warning')
+      }
       if (isCustomProviderContext(detail, upstreamErrors)) pushEvidence(evidence, 'provider_kind', 'custom', 'warning')
       const recorded = parseRecordedSchedulerDiagnostics(detail)
       if (recorded?.inbound_protocol) pushEvidence(evidence, 'inbound_protocol', recorded.inbound_protocol)
@@ -393,8 +737,14 @@ function rootModule(cause: ErrorAnalysisRootCause, failedStep: ErrorAnalysisStep
   return moduleForStep(failedStep)
 }
 
-function confidenceFor(cause: ErrorAnalysisRootCause, detail: OpsErrorDetail | null, upstreamErrors: OpsErrorDetail[]): ErrorAnalysisResult['confidence'] {
+function confidenceFor(
+  cause: ErrorAnalysisRootCause,
+  detail: OpsErrorDetail | null,
+  upstreamErrors: OpsErrorDetail[],
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
+): ErrorAnalysisResult['confidence'] {
   if (!detail) return 'low'
+  if (cause === 'no_available_account' && schedulerGateDiagnostics?.primaryGate) return 'high'
   if (cause === 'no_available_account' && hasNoAvailableAccount(detail)) return 'high'
   if (cause === 'provider_upstream' && hasUpstreamAttempt(detail, upstreamErrors)) return 'high'
   if (cause === 'auth_forbidden' && normalize(detail.phase) === 'auth') return 'high'
@@ -403,10 +753,43 @@ function confidenceFor(cause: ErrorAnalysisRootCause, detail: OpsErrorDetail | n
   return 'medium'
 }
 
-function suggestionKeysFor(cause: ErrorAnalysisRootCause, detail: OpsErrorDetail | null, upstreamErrors: OpsErrorDetail[]): string[] {
+function suggestionKeysFor(
+  cause: ErrorAnalysisRootCause,
+  detail: OpsErrorDetail | null,
+  upstreamErrors: OpsErrorDetail[],
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
+): string[] {
   const custom = isCustomProviderContext(detail, upstreamErrors)
 
   if (cause === 'no_available_account') {
+    const primaryGate = schedulerGateDiagnostics?.primaryGate
+    if (primaryGate) {
+      const noAttempt = upstreamErrors.length === 0 ? ['customNoUpstreamAttempt'] : []
+      switch (primaryGate) {
+        case 'excluded':
+          return custom ? ['customCheckAccountGroup', ...noAttempt] : ['checkAccountGroup']
+        case 'model_unsupported':
+        case 'channel_restricted':
+          return custom ? ['customCheckModelScope', ...noAttempt] : ['checkModelScope']
+        case 'protocol_unsupported':
+          return custom ? ['customCheckProtocol', ...noAttempt] : ['checkRequestEndpoint']
+        case 'capability_unsupported':
+        case 'image_unsupported':
+        case 'transport_unsupported':
+          return custom ? ['customCheckProtocol', 'customCheckModelScope', ...noAttempt] : ['checkRequestEndpoint', 'checkModelScope']
+        case 'quota_paused':
+        case 'runtime_blocked':
+        case 'unschedulable':
+        case 'privacy_required':
+          return custom ? ['customCheckAccountAvailability', ...noAttempt] : ['checkAccountAvailability', 'checkRateLimitOrTempUnsched']
+        case 'fresh_recheck_rejected':
+          return ['checkSchedulerFreshCache', 'checkAccountAvailability', 'checkModelScope']
+        case 'compact_unsupported':
+          return ['checkOpenAICompactSupport', 'checkProviderModelPermission']
+        case 'slot_acquire_miss':
+          return ['checkAccountConcurrency', 'checkRateLimitOrTempUnsched']
+      }
+    }
     return custom
       ? [
           'customCheckAccountGroup',
@@ -432,6 +815,8 @@ export function buildErrorAnalysis(
 ): ErrorAnalysisResult {
   const cause = determineRootCause(detail, upstreamErrors)
   const failedStep = failedStepForCause(cause, detail)
+  const schedulerGateDiagnostics = parseSchedulerGateDiagnostics(detail) ??
+    upstreamErrors.map((item) => parseSchedulerGateDiagnostics(item)).find((item): item is SchedulerGateDiagnostics => Boolean(item))
   const stepKeys: ErrorAnalysisStepKey[] = [
     'request_intake',
     'auth',
@@ -446,7 +831,7 @@ export function buildErrorAnalysis(
     key,
     module: moduleForStep(key),
     state: stateForStep(key, failedStep, detail, upstreamErrors),
-    evidence: buildStepEvidence(key, detail, upstreamErrors)
+    evidence: buildStepEvidence(key, detail, upstreamErrors, schedulerGateDiagnostics)
   }))
 
   const evidence: ErrorAnalysisEvidence[] = []
@@ -460,16 +845,23 @@ export function buildErrorAnalysis(
     pushEvidence(evidence, 'group', detail.group_name || detail.group_id)
     pushEvidence(evidence, 'model', modelLabel(detail))
     pushEvidence(evidence, 'upstream_attempts', upstreamErrors.length, upstreamErrors.length ? 'warning' : 'neutral')
+    if (schedulerGateDiagnostics?.primaryGate) {
+      pushEvidence(evidence, 'scheduler_gate_primary', schedulerGateDiagnostics.primaryGate, 'danger')
+    }
+    if (schedulerGateDiagnostics) {
+      pushEvidence(evidence, 'scheduler_gate_counts', formatSchedulerGateCounts(schedulerGateDiagnostics), 'danger')
+    }
   }
 
   return {
     rootCause: cause,
     rootModule: rootModule(cause, failedStep),
-    confidence: confidenceFor(cause, detail, upstreamErrors),
+    confidence: confidenceFor(cause, detail, upstreamErrors, schedulerGateDiagnostics),
     failedStep,
     steps,
     evidence,
-    suggestionKeys: suggestionKeysFor(cause, detail, upstreamErrors)
+    suggestionKeys: suggestionKeysFor(cause, detail, upstreamErrors, schedulerGateDiagnostics),
+    schedulerGateDiagnostics
   }
 }
 
@@ -487,7 +879,8 @@ export function accountDisplayLabel(account: Account): string {
 export function diagnoseSchedulerAccount(
   account: Account,
   detail: OpsErrorDetail | null,
-  now = Date.now()
+  now = Date.now(),
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
 ): ErrorAnalysisAccountDiagnostic {
   const recorded = parseRecordedSchedulerDiagnostics(detail)
   const recordedAccount = recorded?.accounts?.find((item) => item.account_id === account.id)
@@ -503,6 +896,7 @@ export function diagnoseSchedulerAccount(
   const groupID = detail?.group_id ?? null
   const model = requestedModelLabel(detail)
   const accountGroupIDs = account.group_ids ?? account.groups?.map((group) => group.id) ?? []
+  const inboundProtocol = inferInboundProtocol(detail)
 
   if (groupID != null && !accountGroupIDs.includes(groupID)) {
     reasons.push({ key: 'group_mismatch', detail: String(groupID) })
@@ -544,6 +938,24 @@ export function diagnoseSchedulerAccount(
 
   if (model && !accountAllowsModel(account, model)) {
     reasons.push({ key: 'model_not_allowed', detail: model })
+  }
+
+  const route = protocolDecision(account, inboundProtocol)
+  if (!route.ok && route.reason) {
+    reasons.push({ key: route.reason, detail: route.detail })
+  }
+
+  if (schedulerGateDiagnostics?.sampleRejectedAccounts.includes(String(account.id))) {
+    const gate = schedulerGateDiagnostics.primaryGate
+    if (gate === 'fresh_recheck_rejected') {
+      reasons.push({ key: 'fresh_recheck_rejected' })
+    } else if (gate === 'compact_unsupported') {
+      reasons.push({ key: 'compact_unsupported' })
+    } else if (gate === 'slot_acquire_miss') {
+      reasons.push({ key: 'slot_acquire_miss' })
+    } else {
+      reasons.push({ key: 'scheduler_rejected_sample', detail: gate || formatSchedulerGateCounts(schedulerGateDiagnostics) })
+    }
   }
 
   // Model-level rate limit (extra.model_rate_limits)
@@ -593,7 +1005,8 @@ export function diagnoseSchedulerAccount(
 export function diagnoseSchedulerAccounts(
   accounts: Account[],
   detail: OpsErrorDetail | null,
-  now = Date.now()
+  now = Date.now(),
+  schedulerGateDiagnostics?: SchedulerGateDiagnostics
 ): ErrorAnalysisAccountDiagnostic[] {
-  return accounts.map((account) => diagnoseSchedulerAccount(account, detail, now))
+  return accounts.map((account) => diagnoseSchedulerAccount(account, detail, now, schedulerGateDiagnostics))
 }
