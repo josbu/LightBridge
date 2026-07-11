@@ -57,6 +57,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 
+	compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
+
 	// Whitelist passthrough headers
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
@@ -67,7 +69,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 	if account.Type == AccountTypeOAuth {
-		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
 		req.Header.Del("conversation_id")
@@ -100,6 +101,23 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 
+	if account.Type == AccountTypeAPIKey && compatMessagesBridge {
+		// Anthropic client identity/session headers have no meaning on a third-party
+		// Responses endpoint and can trigger provider-specific validation. Preserve
+		// them inside LightBridge context, but expose a stable Router identity upstream.
+		req.Header.Del("originator")
+		req.Header.Del("conversation_id")
+		req.Header.Del("session_id")
+		req.Header.Del("x-codex-turn-state")
+		req.Header.Del("x-codex-turn-metadata")
+		if isStream {
+			req.Header.Set("accept", "text/event-stream")
+		} else {
+			req.Header.Set("accept", "application/json")
+		}
+		req.Header.Set("user-agent", openAIRouterBridgeUserAgent)
+	}
+
 	// Apply custom User-Agent if configured
 	customUA := account.GetOpenAIUserAgent()
 	if customUA != "" {
@@ -108,7 +126,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为 Codex CLI。
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
-	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
+	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI && !compatMessagesBridge {
 		req.Header.Set("user-agent", codexCLIUserAgent)
 	}
 

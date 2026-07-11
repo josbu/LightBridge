@@ -54,14 +54,19 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 		isClaudeCode = claudeCodeValidator.Validate(c.Request, bodyMap)
 	}
 
-	// 更新 request context
+	// 更新 request context。严格 body/header 验证成功后，以 Claude Code
+	// profile 覆盖早期仅基于请求头的通用识别结果。
 	ctx := service.SetClaudeCodeClient(c.Request.Context(), isClaudeCode)
-
-	// 仅在确认为 Claude Code 客户端时提取版本号写入 context
 	if isClaudeCode {
+		profile := service.DetectRouterClientProfile(c.Request)
+		profile.Kind = service.RouterClientClaudeCode
+		profile.StrictAnthropicStream = true
+		profile.StrictAnthropicUsage = true
 		if version := claudeCodeValidator.ExtractVersion(ua); version != "" {
+			profile.Version = version
 			ctx = service.SetClaudeCodeVersion(ctx, version)
 		}
+		ctx = service.WithRouterClientProfile(ctx, profile)
 	}
 
 	c.Request = c.Request.WithContext(ctx)

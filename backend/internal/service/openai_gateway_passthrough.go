@@ -691,6 +691,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
+	strictResponsesClient := c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context())
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	// SSE headers
@@ -779,6 +780,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			if openAIStreamEventIsTerminal(trimmedData) {
 				sawTerminalEvent = true
+				if strictResponsesClient {
+					if normalized, changed := normalizeOpenAIResponsesTerminalEvent(dataBytes); changed {
+						dataBytes = normalized
+						trimmedData = string(normalized)
+						line = "data: " + trimmedData
+						eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
+					}
+				}
 			}
 			imageCounter.AddSSEData(dataBytes)
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
@@ -880,6 +889,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		return s.handlePassthroughSSEToJSON(resp, c, body, originalModel, mappedModel)
 	}
 
+	if c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context()) {
+		if normalized, changed := normalizeOpenAIResponsesObject(body); changed {
+			body = normalized
+		}
+	}
+
 	usage := &OpenAIUsage{}
 	usageParsed := false
 	if len(body) > 0 {
@@ -921,6 +936,11 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 
 	usage := &OpenAIUsage{}
 	if ok {
+		if c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context()) {
+			if normalized, changed := normalizeOpenAIResponsesObject(finalResponse); changed {
+				finalResponse = normalized
+			}
+		}
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage
 		}

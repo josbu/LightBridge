@@ -414,6 +414,91 @@ type ResponsesStreamEvent struct {
 	SequenceNumber int `json:"sequence_number,omitempty"`
 }
 
+// NormalizeResponsesUsage returns a non-nil canonical usage object. Compatible
+// upstreams sometimes omit usage entirely or use prompt/completion aliases; the
+// custom unmarshaller already resolves aliases, and this helper guarantees the
+// required numeric fields and total are present for strict clients.
+func NormalizeResponsesUsage(usage *ResponsesUsage) *ResponsesUsage {
+	if usage == nil {
+		return &ResponsesUsage{}
+	}
+	copy := *usage
+	if copy.TotalTokens == 0 && (copy.InputTokens != 0 || copy.OutputTokens != 0) {
+		copy.TotalTokens = copy.InputTokens + copy.OutputTokens
+	}
+	return &copy
+}
+
+// NormalizeResponsesResponse fills the protocol-level fields that strict
+// Responses clients dereference unconditionally. It does not invent token
+// counts; absent upstream usage is represented as a canonical zero-valued
+// usage object so downstream code can distinguish a valid shape from missing
+// data without crashing.
+func NormalizeResponsesResponse(resp *ResponsesResponse, fallbackStatus string) *ResponsesResponse {
+	if resp == nil {
+		resp = &ResponsesResponse{}
+	}
+	if resp.Object == "" {
+		resp.Object = "response"
+	}
+	if resp.Status == "" {
+		resp.Status = fallbackStatus
+	}
+	if resp.Output == nil {
+		resp.Output = []ResponsesOutput{}
+	}
+	resp.Usage = NormalizeResponsesUsage(resp.Usage)
+	return resp
+}
+
+// NormalizeResponsesStreamEvent reconciles the common response-compatible
+// variants seen in new-api and other gateways: usage at the event top level,
+// a missing response wrapper on terminal events, and response.done aliases.
+func NormalizeResponsesStreamEvent(evt *ResponsesStreamEvent) {
+	if evt == nil {
+		return
+	}
+
+	fallbackStatus := ""
+	switch evt.Type {
+	case "response.created", "response.in_progress":
+		fallbackStatus = "in_progress"
+	case "response.completed", "response.done":
+		fallbackStatus = "completed"
+	case "response.incomplete", "response.cancelled", "response.canceled":
+		fallbackStatus = "incomplete"
+	case "response.failed":
+		fallbackStatus = "failed"
+	}
+
+	if evt.Response == nil && fallbackStatus != "" {
+		evt.Response = &ResponsesResponse{}
+	}
+	if evt.Response == nil {
+		return
+	}
+	if evt.Response.Usage == nil && evt.Usage != nil {
+		evt.Response.Usage = NormalizeResponsesUsage(evt.Usage)
+	}
+	// A terminal Responses event has a stable response contract. Created and
+	// in-progress events may legitimately omit usage, so only terminal events
+	// synthesize the required zero-valued object.
+	isTerminal := fallbackStatus == "completed" || fallbackStatus == "incomplete" || fallbackStatus == "failed"
+	if isTerminal {
+		evt.Response = NormalizeResponsesResponse(evt.Response, fallbackStatus)
+	} else {
+		if evt.Response.Object == "" {
+			evt.Response.Object = "response"
+		}
+		if evt.Response.Status == "" {
+			evt.Response.Status = fallbackStatus
+		}
+		if evt.Response.Output == nil {
+			evt.Response.Output = []ResponsesOutput{}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI Chat Completions API types
 // ---------------------------------------------------------------------------

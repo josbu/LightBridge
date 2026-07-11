@@ -318,6 +318,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	usage := &OpenAIUsage{}
+	strictResponsesClient := c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context())
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
 	responseID := ""
@@ -450,6 +451,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		eventType, eventResponseID, responseField := parseOpenAIWSEventEnvelope(message)
 		if eventType == "" {
 			continue
+		}
+		if strictResponsesClient && isOpenAIWSTerminalEvent(eventType) {
+			if normalized, changed := normalizeOpenAIResponsesTerminalEvent(message); changed {
+				message = normalized
+				eventType, eventResponseID, responseField = parseOpenAIWSEventEnvelope(message)
+			}
 		}
 		eventCount++
 		if firstEventType == "" {
@@ -627,6 +634,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			finalResponse = s.replaceModelInResponseBody(finalResponse, mappedModel, originalModel)
 		}
 		finalResponse = s.correctToolCallsInResponseBody(finalResponse)
+		if strictResponsesClient {
+			if normalized, changed := normalizeOpenAIResponsesObject(finalResponse); changed {
+				finalResponse = normalized
+			}
+		}
 		populateOpenAIUsageFromResponseJSON(finalResponse, usage)
 		if responseID == "" {
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())

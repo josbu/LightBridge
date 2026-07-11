@@ -2419,3 +2419,35 @@ func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) 
 	require.Empty(t, frame.EventType)
 	require.JSONEq(t, `{"delta":"ok"}`, frame.Data)
 }
+
+func TestOpenAIBuildUpstreamRequestAPIKeyMessagesBridgeNormalizesClientHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"grok-4.5","prompt_cache_key":"anthropic-metadata-session-1","stream":true,"input":[]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.63")
+	c.Request.Header.Set("Originator", "Codex Desktop")
+	c.Request.Header.Set("Conversation_ID", "client-conversation")
+	c.Request.Header.Set("Session_ID", "client-session")
+	c.Request.Header.Set("X-Codex-Turn-State", "secret-turn-state")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Gateway:  config.GatewayConfig{ForceCodexCLI: true},
+		Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+	}}
+	account := &Account{
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Credentials: map[string]any{"base_url": "https://example.com/v1"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "anthropic-metadata-session-1", false)
+	require.NoError(t, err)
+	require.Equal(t, "text/event-stream", req.Header.Get("Accept"))
+	require.Equal(t, openAIRouterBridgeUserAgent, req.Header.Get("User-Agent"))
+	require.Empty(t, req.Header.Get("Originator"))
+	require.Empty(t, req.Header.Get("Conversation_ID"))
+	require.Empty(t, req.Header.Get("Session_ID"))
+	require.Empty(t, req.Header.Get("X-Codex-Turn-State"))
+}

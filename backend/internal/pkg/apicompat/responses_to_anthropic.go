@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -204,32 +205,119 @@ func ResponsesEventToAnthropicEvents(
 	evt *ResponsesStreamEvent,
 	state *ResponsesEventToAnthropicState,
 ) []AnthropicStreamEvent {
-	switch evt.Type {
-	case "response.created":
-		return resToAnthHandleCreated(evt, state)
-	case "response.output_item.added":
-		return resToAnthHandleOutputItemAdded(evt, state)
-	case "response.output_text.delta":
-		return resToAnthHandleTextDelta(evt, state)
-	case "response.output_text.done":
-		return resToAnthHandleBlockDone(state)
-	case "response.function_call_arguments.delta":
-		return resToAnthHandleFuncArgsDelta(evt, state)
-	case "response.function_call_arguments.done":
-		return resToAnthHandleFuncArgsDone(evt, state)
-	case "response.output_item.done":
-		return resToAnthHandleOutputItemDone(evt, state)
-	case "response.reasoning_summary_text.delta":
-		return resToAnthHandleReasoningDelta(evt, state)
-	case "response.reasoning_summary_text.done":
-		return resToAnthHandleBlockDone(state)
-	// response.done 是 Realtime/WS 与项目透传路径使用的终止别名；
-	// 普通 Responses HTTP SSE 的公开终止事件仍以 response.completed 为主。
-	case "response.completed", "response.done", "response.incomplete", "response.failed":
-		return resToAnthHandleCompleted(evt, state)
-	default:
+	if evt == nil || state == nil || !isResponsesToAnthropicEvent(evt.Type) {
 		return nil
 	}
+
+	NormalizeResponsesStreamEvent(evt)
+	captureResponsesAnthropicStreamMetadata(evt, state)
+
+	if evt.Type == "response.created" {
+		return ensureAnthropicMessageStart(state)
+	}
+
+	// Several OpenAI-compatible gateways (notably new-api relaying xAI/Grok)
+	// can omit response.created or start directly with a delta/terminal event.
+	// Anthropic clients require message_start to be the first semantic event,
+	// so synthesize it before every recognized event when necessary.
+	events := ensureAnthropicMessageStart(state)
+	var converted []AnthropicStreamEvent
+	switch evt.Type {
+	case "response.output_item.added":
+		converted = resToAnthHandleOutputItemAdded(evt, state)
+	case "response.output_text.delta":
+		converted = resToAnthHandleTextDelta(evt, state)
+	case "response.output_text.done":
+		converted = resToAnthHandleBlockDone(state)
+	case "response.function_call_arguments.delta":
+		converted = resToAnthHandleFuncArgsDelta(evt, state)
+	case "response.function_call_arguments.done":
+		converted = resToAnthHandleFuncArgsDone(evt, state)
+	case "response.output_item.done":
+		converted = resToAnthHandleOutputItemDone(evt, state)
+	case "response.reasoning_summary_text.delta":
+		converted = resToAnthHandleReasoningDelta(evt, state)
+	case "response.reasoning_summary_text.done":
+		converted = resToAnthHandleBlockDone(state)
+	// response.done 是 Realtime/WS 与项目透传路径使用的终止别名；
+	// 普通 Responses HTTP SSE 的公开终止事件仍以 response.completed 为主。
+	case "response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled":
+		converted = resToAnthHandleCompleted(evt, state)
+	}
+	return append(events, converted...)
+}
+
+func isResponsesToAnthropicEvent(eventType string) bool {
+	switch eventType {
+	case "response.created",
+		"response.output_item.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.done",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.done",
+		"response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func captureResponsesAnthropicStreamMetadata(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) {
+	if evt == nil || state == nil {
+		return
+	}
+	if evt.Response != nil {
+		if id := strings.TrimSpace(evt.Response.ID); id != "" {
+			state.ResponseID = id
+		}
+		if state.Model == "" {
+			state.Model = strings.TrimSpace(evt.Response.Model)
+		}
+		if evt.Response.Usage != nil {
+			usage := anthropicUsageFromResponsesUsage(evt.Response.Usage)
+			state.InputTokens = usage.InputTokens
+			state.OutputTokens = usage.OutputTokens
+			state.CacheReadInputTokens = usage.CacheReadInputTokens
+		}
+	}
+	if evt.Usage != nil {
+		usage := anthropicUsageFromResponsesUsage(evt.Usage)
+		state.InputTokens = usage.InputTokens
+		state.OutputTokens = usage.OutputTokens
+		state.CacheReadInputTokens = usage.CacheReadInputTokens
+	}
+}
+
+func ensureAnthropicMessageStart(state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	if state == nil || state.MessageStartSent {
+		return nil
+	}
+	state.MessageStartSent = true
+	if strings.TrimSpace(state.ResponseID) == "" {
+		state.ResponseID = fmt.Sprintf("msg_router_%d", state.Created)
+	}
+	if strings.TrimSpace(state.Model) == "" {
+		state.Model = "unknown"
+	}
+
+	return []AnthropicStreamEvent{{
+		Type: "message_start",
+		Message: &AnthropicResponse{
+			ID:      state.ResponseID,
+			Type:    "message",
+			Role:    "assistant",
+			Content: []AnthropicContentBlock{},
+			Model:   state.Model,
+			Usage: AnthropicUsage{
+				InputTokens:          state.InputTokens,
+				OutputTokens:         0,
+				CacheReadInputTokens: state.CacheReadInputTokens,
+			},
+		},
+	}}
 }
 
 // FinalizeResponsesAnthropicStream emits synthetic termination events if the
@@ -277,33 +365,8 @@ func ResponsesAnthropicEventToSSE(evt AnthropicStreamEvent) (string, error) {
 // --- internal handlers ---
 
 func resToAnthHandleCreated(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	if evt.Response != nil {
-		state.ResponseID = evt.Response.ID
-		// Only use upstream model if no override was set (e.g. originalModel)
-		if state.Model == "" {
-			state.Model = evt.Response.Model
-		}
-	}
-
-	if state.MessageStartSent {
-		return nil
-	}
-	state.MessageStartSent = true
-
-	return []AnthropicStreamEvent{{
-		Type: "message_start",
-		Message: &AnthropicResponse{
-			ID:      state.ResponseID,
-			Type:    "message",
-			Role:    "assistant",
-			Content: []AnthropicContentBlock{},
-			Model:   state.Model,
-			Usage: AnthropicUsage{
-				InputTokens:  0,
-				OutputTokens: 0,
-			},
-		},
-	}}
+	captureResponsesAnthropicStreamMetadata(evt, state)
+	return ensureAnthropicMessageStart(state)
 }
 
 func resToAnthHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
@@ -564,6 +627,13 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	}
 
 	var events []AnthropicStreamEvent
+	// Some compatible gateways emit only a terminal event containing the full
+	// response.output array. Reconstruct content blocks when no incremental
+	// block has been observed; otherwise terminal-only Grok/new-api responses
+	// look like an empty Anthropic message even though the upstream answered.
+	if state.ContentBlockIndex == 0 && !state.ContentBlockOpen && evt.Response != nil {
+		events = append(events, emitAnthropicTerminalOutput(evt.Response, state)...)
+	}
 	events = append(events, closeCurrentBlock(state)...)
 
 	stopReason := "end_turn"
@@ -607,6 +677,84 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		AnthropicStreamEvent{Type: "message_stop"},
 	)
 	state.MessageStopSent = true
+	return events
+}
+
+func emitAnthropicTerminalOutput(resp *ResponsesResponse, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	if resp == nil || state == nil || len(resp.Output) == 0 {
+		return nil
+	}
+
+	converted := ResponsesToAnthropic(resp, state.Model)
+	if converted == nil {
+		return nil
+	}
+
+	var events []AnthropicStreamEvent
+	for _, block := range converted.Content {
+		idx := state.ContentBlockIndex
+		switch block.Type {
+		case "text":
+			events = append(events, AnthropicStreamEvent{
+				Type:  "content_block_start",
+				Index: &idx,
+				ContentBlock: &AnthropicContentBlock{
+					Type: "text",
+					Text: "",
+				},
+			})
+			if block.Text != "" {
+				events = append(events, AnthropicStreamEvent{
+					Type:  "content_block_delta",
+					Index: &idx,
+					Delta: &AnthropicDelta{Type: "text_delta", Text: block.Text},
+				})
+			}
+
+		case "thinking":
+			events = append(events, AnthropicStreamEvent{
+				Type:  "content_block_start",
+				Index: &idx,
+				ContentBlock: &AnthropicContentBlock{
+					Type:     "thinking",
+					Thinking: "",
+				},
+			})
+			if block.Thinking != "" {
+				events = append(events, AnthropicStreamEvent{
+					Type:  "content_block_delta",
+					Index: &idx,
+					Delta: &AnthropicDelta{Type: "thinking_delta", Thinking: block.Thinking},
+				})
+			}
+
+		case "tool_use":
+			state.HasToolCall = true
+			events = append(events, AnthropicStreamEvent{
+				Type:  "content_block_start",
+				Index: &idx,
+				ContentBlock: &AnthropicContentBlock{
+					Type:  "tool_use",
+					ID:    block.ID,
+					Name:  block.Name,
+					Input: json.RawMessage("{}"),
+				},
+			})
+			raw := strings.TrimSpace(string(block.Input))
+			if raw != "" && raw != "{}" {
+				events = append(events, AnthropicStreamEvent{
+					Type:  "content_block_delta",
+					Index: &idx,
+					Delta: &AnthropicDelta{Type: "input_json_delta", PartialJSON: raw},
+				})
+			}
+
+		default:
+			continue
+		}
+		events = append(events, AnthropicStreamEvent{Type: "content_block_stop", Index: &idx})
+		state.ContentBlockIndex++
+	}
 	return events
 }
 

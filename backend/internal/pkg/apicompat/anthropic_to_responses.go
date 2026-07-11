@@ -484,3 +484,31 @@ func normalizeToolParameters(schema json.RawMessage) json.RawMessage {
 	}
 	return out
 }
+
+// NormalizeResponsesRequestForUpstream applies model-family capability rules
+// after Router model mapping. The Anthropic bridge defaults are optimized for
+// OpenAI/Codex; compatible providers may implement a smaller Responses surface.
+func NormalizeResponsesRequestForUpstream(req *ResponsesRequest, upstreamModel string) {
+	if req == nil {
+		return
+	}
+	model := strings.ToLower(strings.TrimSpace(upstreamModel))
+	if model == "" {
+		model = strings.ToLower(strings.TrimSpace(req.Model))
+	}
+
+	if strings.HasPrefix(model, "grok-4.5") {
+		// xAI documents reasoning.effort and encrypted reasoning for grok-4.5,
+		// but not OpenAI's text.verbosity extension. Avoid forwarding a default
+		// field that was not present in the Anthropic request.
+		req.Text = nil
+		if req.Reasoning != nil {
+			if req.Reasoning.Effort == "xhigh" {
+				req.Reasoning.Effort = "high"
+			}
+			// xAI emits reasoning summaries without requiring OpenAI's summary
+			// selector; omitting it improves compatibility through new-api.
+			req.Reasoning.Summary = ""
+		}
+	}
+}

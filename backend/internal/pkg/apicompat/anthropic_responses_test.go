@@ -508,12 +508,13 @@ func TestResponsesEventToAnthropicEvents_ResponseDone(t *testing.T) {
 			Usage:  &ResponsesUsage{InputTokens: 12, OutputTokens: 4},
 		},
 	}, state)
-	require.Len(t, events, 2)
-	assert.Equal(t, "message_delta", events[0].Type)
-	assert.Equal(t, "end_turn", events[0].Delta.StopReason)
-	assert.Equal(t, 12, events[0].Usage.InputTokens)
-	assert.Equal(t, 4, events[0].Usage.OutputTokens)
-	assert.Equal(t, "message_stop", events[1].Type)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "message_delta", events[1].Type)
+	assert.Equal(t, "end_turn", events[1].Delta.StopReason)
+	assert.Equal(t, 12, events[1].Usage.InputTokens)
+	assert.Equal(t, 4, events[1].Usage.OutputTokens)
+	assert.Equal(t, "message_stop", events[2].Type)
 	assert.Nil(t, FinalizeResponsesAnthropicStream(state))
 }
 
@@ -535,13 +536,14 @@ func TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage(t *testing.T) {
 		},
 	}, state)
 
-	require.Len(t, events, 2)
-	assert.Equal(t, "message_delta", events[0].Type)
-	require.NotNil(t, events[0].Usage)
-	assert.Equal(t, 15, events[0].Usage.InputTokens)
-	assert.Equal(t, 5, events[0].Usage.CacheReadInputTokens)
-	assert.Equal(t, 6, events[0].Usage.OutputTokens)
-	assert.Equal(t, "message_stop", events[1].Type)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "message_delta", events[1].Type)
+	require.NotNil(t, events[1].Usage)
+	assert.Equal(t, 15, events[1].Usage.InputTokens)
+	assert.Equal(t, 5, events[1].Usage.CacheReadInputTokens)
+	assert.Equal(t, 6, events[1].Usage.OutputTokens)
+	assert.Equal(t, "message_stop", events[2].Type)
 }
 
 func TestResponsesEventToAnthropicEvents_ResponseDoneIncomplete(t *testing.T) {
@@ -556,10 +558,11 @@ func TestResponsesEventToAnthropicEvents_ResponseDoneIncomplete(t *testing.T) {
 			Usage:             &ResponsesUsage{InputTokens: 12, OutputTokens: 4},
 		},
 	}, state)
-	require.Len(t, events, 2)
-	assert.Equal(t, "message_delta", events[0].Type)
-	assert.Equal(t, "max_tokens", events[0].Delta.StopReason)
-	assert.Equal(t, "message_stop", events[1].Type)
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "message_delta", events[1].Type)
+	assert.Equal(t, "max_tokens", events[1].Delta.StopReason)
+	assert.Equal(t, "message_stop", events[2].Type)
 	assert.Nil(t, FinalizeResponsesAnthropicStream(state))
 }
 
@@ -1732,4 +1735,154 @@ func TestAnthropicEventToResponses_CacheTokensFromMessageDelta(t *testing.T) {
 	assert.Equal(t, 8, completed.Response.Usage.OutputTokens)
 	require.NotNil(t, completed.Response.Usage.InputTokensDetails)
 	assert.Equal(t, 11, completed.Response.Usage.InputTokensDetails.CachedTokens)
+}
+
+func TestResponsesEventToAnthropicEvents_DeltaBeforeCreatedSynthesizesMessageStart(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.Model = "claude-sonnet-4-5"
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type:  "response.output_text.delta",
+		Delta: "hello",
+	}, state)
+
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	require.NotNil(t, events[0].Message)
+	assert.Equal(t, "claude-sonnet-4-5", events[0].Message.Model)
+	assert.NotEmpty(t, events[0].Message.ID)
+	assert.Equal(t, 0, events[0].Message.Usage.InputTokens)
+	assert.Equal(t, "content_block_start", events[1].Type)
+	assert.Equal(t, "content_block_delta", events[2].Type)
+}
+
+func TestResponsesEventToAnthropicEvents_NewAPIGrokTerminalWithoutUsage(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.Model = "grok-4.5"
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type: "response.completed",
+		Response: &ResponsesResponse{
+			ID:     "resp_grok",
+			Model:  "grok-4.5",
+			Status: "completed",
+			Output: []ResponsesOutput{},
+		},
+	}, state)
+
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	require.NotNil(t, events[0].Message)
+	assert.Equal(t, 0, events[0].Message.Usage.InputTokens)
+	assert.Equal(t, "message_delta", events[1].Type)
+	require.NotNil(t, events[1].Usage)
+	assert.Equal(t, 0, events[1].Usage.InputTokens)
+	assert.Equal(t, 0, events[1].Usage.OutputTokens)
+	assert.Equal(t, "message_stop", events[2].Type)
+}
+
+func TestNormalizeResponsesStreamEventCopiesTopLevelUsage(t *testing.T) {
+	event := &ResponsesStreamEvent{
+		Type:  "response.done",
+		Usage: &ResponsesUsage{InputTokens: 9, OutputTokens: 4},
+	}
+	NormalizeResponsesStreamEvent(event)
+	require.NotNil(t, event.Response)
+	require.NotNil(t, event.Response.Usage)
+	assert.Equal(t, "completed", event.Response.Status)
+	assert.Equal(t, 9, event.Response.Usage.InputTokens)
+	assert.Equal(t, 4, event.Response.Usage.OutputTokens)
+	assert.Equal(t, 13, event.Response.Usage.TotalTokens)
+	assert.NotNil(t, event.Response.Output)
+}
+
+func TestNormalizeResponsesRequestForUpstreamGrok45(t *testing.T) {
+	req := &ResponsesRequest{
+		Model:     "grok-4.5",
+		Text:      &ResponsesText{Verbosity: "medium"},
+		Reasoning: &ResponsesReasoning{Effort: "xhigh", Summary: "auto"},
+		Include:   []string{"reasoning.encrypted_content"},
+	}
+	NormalizeResponsesRequestForUpstream(req, "grok-4.5")
+	assert.Nil(t, req.Text)
+	require.NotNil(t, req.Reasoning)
+	assert.Equal(t, "high", req.Reasoning.Effort)
+	assert.Empty(t, req.Reasoning.Summary)
+	assert.Equal(t, []string{"reasoning.encrypted_content"}, req.Include)
+}
+
+func TestResponsesEventToAnthropicEvents_TerminalOnlyTextOutput(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.Model = "grok-4.5"
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type: "response.completed",
+		Response: &ResponsesResponse{
+			ID:     "resp_terminal_text",
+			Model:  "grok-4.5",
+			Status: "completed",
+			Output: []ResponsesOutput{{
+				Type: "message",
+				Role: "assistant",
+				Content: []ResponsesContentPart{{
+					Type: "output_text",
+					Text: "terminal-only answer",
+				}},
+			}},
+		},
+	}, state)
+
+	require.Len(t, events, 6)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "content_block_start", events[1].Type)
+	assert.Equal(t, "content_block_delta", events[2].Type)
+	require.NotNil(t, events[2].Delta)
+	assert.Equal(t, "terminal-only answer", events[2].Delta.Text)
+	assert.Equal(t, "content_block_stop", events[3].Type)
+	assert.Equal(t, "message_delta", events[4].Type)
+	assert.Equal(t, "message_stop", events[5].Type)
+}
+
+func TestResponsesEventToAnthropicEvents_TerminalOnlyFunctionCall(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.Model = "grok-4.5"
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
+		Type: "response.completed",
+		Response: &ResponsesResponse{
+			ID:     "resp_terminal_tool",
+			Model:  "grok-4.5",
+			Status: "completed",
+			Output: []ResponsesOutput{{
+				Type:      "function_call",
+				CallID:    "call_1",
+				Name:      "Read",
+				Arguments: `{"file_path":"README.md"}`,
+			}},
+		},
+	}, state)
+
+	require.Len(t, events, 6)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "content_block_start", events[1].Type)
+	require.NotNil(t, events[1].ContentBlock)
+	assert.Equal(t, "tool_use", events[1].ContentBlock.Type)
+	assert.Equal(t, "Read", events[1].ContentBlock.Name)
+	assert.Equal(t, "content_block_delta", events[2].Type)
+	require.NotNil(t, events[2].Delta)
+	assert.JSONEq(t, `{"file_path":"README.md"}`, events[2].Delta.PartialJSON)
+	assert.Equal(t, "tool_use", events[4].Delta.StopReason)
+	assert.Equal(t, "message_stop", events[5].Type)
+}
+
+func TestResponsesEventToAnthropicEvents_CancelledAliasIsTerminal(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.Model = "grok-4.5"
+
+	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.cancelled"}, state)
+
+	require.Len(t, events, 3)
+	assert.Equal(t, "message_start", events[0].Type)
+	assert.Equal(t, "message_delta", events[1].Type)
+	assert.Equal(t, "message_stop", events[2].Type)
 }

@@ -78,4 +78,7 @@ const (
 
 	// ClaudeCodeVersion stores the extracted Claude Code version from User-Agent (e.g. "2.1.22")
 	ClaudeCodeVersion Key = "ctx_claude_code_version"
+
+	// RouterClientProfile stores the normalized client capability profile used by Router.
+	RouterClientProfile Key = "ctx_router_client_profile"
 )

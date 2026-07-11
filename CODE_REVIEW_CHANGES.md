@@ -238,3 +238,27 @@ changed = 0
 - 本阶段没有引入 Rust：已定位的热点主要是 PostgreSQL、Redis、网络和文件系统 I/O，引入 FFI/sidecar 只会增加发布和跨平台复杂度。Rust 留待 CPU profile 证明存在稳定纯计算热点后再评估。
 
 详细边界与模块 UI 契约见 `docs/architecture/PROGRESSIVE_FEATURES.md`。
+
+## 第四轮：Router 严格客户端协议兼容
+
+### 19. Claude Code / new-api / Grok 4.5 响应契约修复
+
+- 增加集中式 Router Client Profile，识别 Claude Code、Codex CLI、Codex App 和 OpenCode 的严格协议需求。
+- Anthropic Messages 流在上游缺少 `response.created` 时仍保证首先发送 `message_start`。
+- `message_start.message.usage.input_tokens` 与终止 `message_delta.usage` 始终存在；缺失上游 usage 时使用明确零值维持结构安全，不伪装成真实计费结果。
+- new-api 或兼容网关只发送最终 `response.output` 时，可从终止事件恢复文本、thinking 和 tool-use 内容，不再返回空 Anthropic 消息。
+- 支持 `response.done/incomplete/failed/cancelled/canceled` 等终止别名。
+
+### 20. Codex / OpenCode Responses 终止结构规范化
+
+- HTTP SSE、非流式、API Key passthrough 与 Responses WebSocket 都统一补齐 `response.object/status/output/usage`。
+- 接受顶层 usage、`prompt_tokens/completion_tokens` 等兼容别名，并转换为 Responses 字段。
+- 原始上游值优先保留；只补缺失字段。
+
+### 21. 客户端请求头和 Grok 4.5 能力策略
+
+- 原生 Codex 路径继续保留受支持的 `originator`、conversation/session 和 turn metadata。
+- Anthropic -> 第三方 Responses 桥接不会伪装成原生 Codex 请求，会移除 Codex 专用会话头并使用稳定 Router User-Agent。
+- Grok 4.5 保留官方支持的 reasoning effort 与 encrypted reasoning，`xhigh` 降级为 `high`，移除桥接器自动添加但 xAI 未声明支持的 `text.verbosity` 和 summary selector。
+
+详细协议边界见 `docs/architecture/ROUTER_PROTOCOL_COMPATIBILITY.md`。

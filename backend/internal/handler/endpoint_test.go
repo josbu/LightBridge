@@ -140,6 +140,26 @@ func TestInboundEndpointMiddleware(t *testing.T) {
 	require.Equal(t, EndpointMessages, captured)
 }
 
+func TestInboundEndpointMiddlewareInjectsRouterClientProfile(t *testing.T) {
+	router := gin.New()
+	router.Use(InboundEndpointMiddleware())
+
+	var profile service.RouterClientProfile
+	router.POST("/v1/messages", func(c *gin.Context) {
+		profile = service.RouterClientProfileFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.177")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, service.RouterClientClaudeCode, profile.Kind)
+	require.True(t, profile.StrictAnthropicStream)
+	require.True(t, profile.StrictAnthropicUsage)
+}
+
 func TestGetInboundEndpoint_FallbackWithoutMiddleware(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

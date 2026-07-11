@@ -39,6 +39,7 @@ type openaiNonStreamingResult struct {
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
+	strictResponsesClient := c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context())
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -232,11 +233,22 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			// Fast path: most events do not contain model field values.
 			if needModelReplace && mappedModel != "" && strings.Contains(data, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+				if replacedData, extracted := extractOpenAISSEDataLine(line); extracted {
+					data = replacedData
+				}
 			}
 
 			dataBytes := []byte(data)
-			if openAIStreamEventIsTerminal(data) {
+			isTerminalEvent := openAIStreamEventIsTerminal(data)
+			if isTerminalEvent {
 				sawTerminalEvent = true
+				if strictResponsesClient {
+					if normalized, changed := normalizeOpenAIResponsesTerminalEvent(dataBytes); changed {
+						dataBytes = normalized
+						data = string(normalized)
+						line = "data: " + data
+					}
+				}
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			if responseID == "" {
@@ -631,6 +643,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)
 	}
 
+	if c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context()) {
+		if normalized, changed := normalizeOpenAIResponsesObject(body); changed {
+			body = normalized
+		}
+	}
+
 	usageValue, usageOK := extractOpenAIUsageFromJSONBytes(body)
 	if !usageOK {
 		if bodyLooksLikeSSE {
@@ -678,6 +696,11 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	usage := &OpenAIUsage{}
 	responseID := ""
 	if ok {
+		if c != nil && c.Request != nil && IsStrictResponsesClient(c.Request.Context()) {
+			if normalized, changed := normalizeOpenAIResponsesObject(finalResponse); changed {
+				finalResponse = normalized
+			}
+		}
 		responseID = extractOpenAIResponseIDFromJSONBytes(finalResponse)
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage

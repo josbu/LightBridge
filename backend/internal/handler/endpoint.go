@@ -151,8 +151,13 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 		inbound := NormalizeInboundEndpoint(path)
 		c.Set(ctxKeyInboundEndpoint, inbound)
 		// 注入请求级入站协议；目标上游协议由 ProtocolRouter 按账号决定。
-		if proto := InboundProtocolForEndpoint(inbound); proto != "" && c.Request != nil {
-			c.Request = c.Request.WithContext(service.WithInboundProtocol(c.Request.Context(), proto))
+		if c.Request != nil {
+			ctx := c.Request.Context()
+			if proto := InboundProtocolForEndpoint(inbound); proto != "" {
+				ctx = service.WithInboundProtocol(ctx, proto)
+			}
+			ctx = service.WithRouterClientProfile(ctx, service.DetectRouterClientProfile(c.Request))
+			c.Request = c.Request.WithContext(ctx)
 		}
 		c.Next()
 	}
