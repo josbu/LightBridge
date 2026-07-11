@@ -16,6 +16,7 @@ import (
 type SettingHandler struct {
 	settingService           *service.SettingService
 	notificationEmailService *service.NotificationEmailService
+	featureRuntime           *service.FeatureRuntimeManager
 	version                  string
 }
 
@@ -31,6 +32,29 @@ func NewSettingHandler(settingService *service.SettingService, version string) *
 // changing the constructor signature used by existing tests.
 func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *service.NotificationEmailService) {
 	h.notificationEmailService = notificationEmailService
+}
+
+// SetFeatureRuntime attaches administrator-only runtime diagnostics while the
+// public manifest remains limited to stable feature availability data.
+func (h *SettingHandler) SetFeatureRuntime(featureRuntime *service.FeatureRuntimeManager) {
+	h.featureRuntime = featureRuntime
+}
+
+// GetFeatureManifest returns the public progressive feature catalog.
+// GET /api/v1/settings/features
+func (h *SettingHandler) GetFeatureManifest(c *gin.Context) {
+	response.Success(c, h.settingService.ProgressiveFeatureManifest(c.Request.Context()))
+}
+
+// GetFeatureRuntimeStatus returns optional worker diagnostics. The route is
+// registered only below the administrator authentication middleware.
+// GET /api/v1/admin/features/runtime
+func (h *SettingHandler) GetFeatureRuntimeStatus(c *gin.Context) {
+	if h.featureRuntime == nil {
+		response.Success(c, []service.FeatureRuntimeComponentStatus{})
+		return
+	}
+	response.Success(c, h.featureRuntime.Status())
 }
 
 // GetPublicSettings 获取公开设置

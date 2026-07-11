@@ -164,30 +164,6 @@ var (
 		end
 		return 1
 	`)
-
-	// startupCleanupScript 清理非当前进程前缀的槽位成员。
-	// KEYS 是有序集合键列表，ARGV[1] 是当前进程前缀，ARGV[2] 是槽位 TTL。
-	// 遍历每个 KEYS[i]，移除前缀不匹配的成员，清空后删 key，否则刷新 EXPIRE。
-	startupCleanupScript = redis.NewScript(`
-		local activePrefix = ARGV[1]
-		local slotTTL = tonumber(ARGV[2])
-		local removed = 0
-		for i = 1, #KEYS do
-			local key = KEYS[i]
-			local members = redis.call('ZRANGE', key, 0, -1)
-			for _, member in ipairs(members) do
-				if string.sub(member, 1, string.len(activePrefix)) ~= activePrefix then
-					removed = removed + redis.call('ZREM', key, member)
-				end
-			end
-			if redis.call('ZCARD', key) == 0 then
-				redis.call('DEL', key)
-			else
-				redis.call('EXPIRE', key, slotTTL)
-			end
-		end
-		return removed
-	`)
 )
 
 type concurrencyCache struct {
@@ -494,32 +470,24 @@ func (c *concurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, accou
 	return err
 }
 
-func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, activeRequestPrefix string) error {
-	if activeRequestPrefix == "" {
-		return nil
-	}
-
-	// 1. 清理有序集合中非当前进程前缀的成员
+func (c *concurrencyCache) CleanupStaleProcessSlots(ctx context.Context, _ string) error {
+	// 历史实现把“请求 ID 前缀不同”误判为“进程已经失效”，会在多实例
+	// 部署或滚动发布时删除其他健康实例的活跃槽位和等待计数。
+	// 槽位有效性只由 Redis 服务器时间与 slot TTL 决定；等待计数依靠自身
+	// TTL 自动回收，因此启动时只清理真正过期的槽位。
 	slotPatterns := []string{accountSlotKeyPrefix + "*", userSlotKeyPrefix + "*"}
 	for _, pattern := range slotPatterns {
-		if err := c.cleanupSlotsByPattern(ctx, pattern, activeRequestPrefix); err != nil {
+		if err := c.cleanupExpiredSlotsByPattern(ctx, pattern); err != nil {
 			return err
 		}
 	}
-
-	// 2. 删除所有等待队列计数器（重启后计数器失效）
-	waitPatterns := []string{accountWaitKeyPrefix + "*", waitQueueKeyPrefix + "*"}
-	for _, pattern := range waitPatterns {
-		if err := c.deleteKeysByPattern(ctx, pattern); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
-// cleanupSlotsByPattern 扫描匹配 pattern 的有序集合键，批量调用 Lua 脚本清理非当前进程成员。
-func (c *concurrencyCache) cleanupSlotsByPattern(ctx context.Context, pattern, activePrefix string) error {
+// cleanupExpiredSlotsByPattern 扫描匹配 pattern 的有序集合键，并按 Redis
+// 服务器时间删除超过 slot TTL 的成员。每次 Lua 调用只操作一个 key，既保留
+// 活跃实例的槽位，也避免 Redis Cluster 中跨 hash slot 的 EVAL 错误。
+func (c *concurrencyCache) cleanupExpiredSlotsByPattern(ctx context.Context, pattern string) error {
 	const scanCount = 200
 	var cursor uint64
 	for {
@@ -527,32 +495,9 @@ func (c *concurrencyCache) cleanupSlotsByPattern(ctx context.Context, pattern, a
 		if err != nil {
 			return fmt.Errorf("scan %s: %w", pattern, err)
 		}
-		if len(keys) > 0 {
-			_, err := startupCleanupScript.Run(ctx, c.rdb, keys, activePrefix, c.slotTTLSeconds).Result()
-			if err != nil {
-				return fmt.Errorf("cleanup slots %s: %w", pattern, err)
-			}
-		}
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
-	}
-	return nil
-}
-
-// deleteKeysByPattern 扫描匹配 pattern 的键并删除。
-func (c *concurrencyCache) deleteKeysByPattern(ctx context.Context, pattern string) error {
-	const scanCount = 200
-	var cursor uint64
-	for {
-		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
-		if err != nil {
-			return fmt.Errorf("scan %s: %w", pattern, err)
-		}
-		if len(keys) > 0 {
-			if err := c.rdb.Del(ctx, keys...).Err(); err != nil {
-				return fmt.Errorf("del %s: %w", pattern, err)
+		for _, key := range keys {
+			if _, err := cleanupExpiredSlotsScript.Run(ctx, c.rdb, []string{key}, c.slotTTLSeconds).Result(); err != nil {
+				return fmt.Errorf("cleanup expired slot key %s: %w", key, err)
 			}
 		}
 		cursor = nextCursor

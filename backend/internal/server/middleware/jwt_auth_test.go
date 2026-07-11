@@ -74,6 +74,9 @@ func newJWTTestEnv(users map[int64]*service.User) (*gin.Engine, *service.AuthSer
 			"role":    role,
 		})
 	})
+	r.GET("/api/v1/payment/config", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
 	return r, authSvc
 }
 
@@ -312,4 +315,51 @@ func TestJWTAuth_TokenVersionMismatch(t *testing.T) {
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, "TOKEN_REVOKED", body.Code)
+}
+
+func TestJWTAuth_PaymentEmbedTokenScopeAndAudience(t *testing.T) {
+	user := &service.User{
+		ID:           1,
+		Email:        "buyer@example.com",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		Concurrency:  5,
+		TokenVersion: 1,
+	}
+	router, authSvc := newJWTTestEnv(map[int64]*service.User{1: user})
+	token, _, _, err := authSvc.GeneratePaymentEmbedToken(user, "https://pay.example.com")
+	require.NoError(t, err)
+
+	t.Run("exact audience and payment path allowed", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/payment/config", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Origin", "https://pay.example.com")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("non payment path rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Origin", "https://pay.example.com")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusForbidden, w.Code)
+		require.Contains(t, w.Body.String(), "TOKEN_SCOPE_FORBIDDEN")
+	})
+
+	for _, origin := range []string{"", "https://evil.example.com", "https://pay.example.com.evil.test"} {
+		t.Run("wrong or missing origin rejected "+origin, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/payment/config", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			if origin != "" {
+				req.Header.Set("Origin", origin)
+			}
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.Contains(t, w.Body.String(), "TOKEN_AUDIENCE_MISMATCH")
+		})
+	}
 }

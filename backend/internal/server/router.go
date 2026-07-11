@@ -123,6 +123,8 @@ func registerRoutes(
 	routes.RegisterUIThemeAssetRoutes(r, h)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, privacyFilterService, cfg)
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
+	routes.RegisterModuleRoutes(v1, h, settingService)
+	routes.RegisterModuleAssetRoutes(r, h, settingService)
 
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
 }

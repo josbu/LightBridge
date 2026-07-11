@@ -394,4 +394,65 @@ export const progressiveRouteGroups = [
       },
     ],
   }),
+  defineProgressiveRouteGroup({
+    feature: ProgressiveFeatures.opsMonitoring,
+    routes: [
+      {
+        path: '/admin/ops',
+        name: 'AdminOps',
+        component: () => import('@/views/admin/ops/OpsDashboard.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          title: 'Ops Monitoring',
+          titleKey: 'admin.ops.title',
+          descriptionKey: 'admin.ops.description',
+        },
+      },
+      {
+        path: '/admin/error-analysis',
+        name: 'AdminErrorAnalysis',
+        component: () => import('@/views/admin/ops/ErrorAnalysisView.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          title: 'Error Analysis',
+          titleKey: 'admin.ops.errorAnalysis.title',
+          descriptionKey: 'admin.ops.errorAnalysis.description',
+        },
+      },
+    ],
+  }),
+  defineProgressiveRouteGroup({
+    feature: ProgressiveFeatures.moduleRuntime,
+    routes: [
+      {
+        path: '/admin/modules',
+        name: 'AdminModules',
+        component: () => import('@/views/admin/ModulesView.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          title: 'Modules',
+          titleKey: 'modules.title',
+          descriptionKey: 'modules.description',
+        },
+      },
+    ],
+  }),
+  defineProgressiveRouteGroup({
+    feature: ProgressiveFeatures.proxies,
+    routes: [
+      {
+        path: '/admin/proxy',
+        name: 'AdminProxyModule',
+        component: () => import('@/views/admin/ProxyModuleView.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          title: 'Proxy Runtime',
+        },
+      },
+    ],
+  }),
 ] as const satisfies readonly ProgressiveRouteGroup[]

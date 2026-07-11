@@ -74,6 +74,11 @@
             </template>
 
             <template #after>
+              <ModuleAccountFormsHost
+                v-if="moduleRuntimeFeatureEnabled"
+                @created="reload"
+              />
+
               <!-- Import -->
               <button
                 @click="openImportData"
@@ -405,8 +410,18 @@
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" :lbc-balance="menu.acc ? (lbcBalanceByAccountId[String(menu.acc.id)] ?? null) : null" @close="menu.show = false" @test="handleTest" @verify-authenticity="handleVerifyAuthenticity" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @refresh-balance="handleSyncLbcBalance" @open-newapi-console="handleOpenNewApiConsole" />
+    <ScheduledTestsPanel v-if="scheduledTestsFeatureEnabled" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <ModuleEntityPanelHost
+      v-if="moduleRuntimeFeatureEnabled"
+      :show="showModuleEntityPanel"
+      :panel="selectedModuleEntityPanel"
+      entity="account"
+      :entity-id="modulePanelAccount?.id ?? null"
+      :context="modulePanelAccount"
+      @close="closeModuleEntityPanel"
+      @updated="handleModuleEntityPanelUpdated"
+    />
+    <AccountActionMenu :show="menu.show" :scheduled-tests-enabled="scheduledTestsFeatureEnabled" :module-entity-panels="accountEntityPanels" :account="menu.acc" :position="menu.pos" :lbc-balance="lightBridgeConnectFeatureEnabled && menu.acc ? (lbcBalanceByAccountId[String(menu.acc.id)] ?? null) : null" @close="menu.show = false" @test="handleTest" @verify-authenticity="handleVerifyAuthenticity" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @refresh-balance="handleSyncLbcBalance" @open-newapi-console="handleOpenNewApiConsole" @module-panel="handleOpenModulePanel" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -436,7 +451,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, shallowRef, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -460,7 +475,6 @@ import ExportFormatModal from '@/components/admin/account/ExportFormatModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
-import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
@@ -472,15 +486,24 @@ import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { lightBridgeConnectAPI, type LightBridgeConnectBalanceItem } from '@/api/lightbridge-connect'
+import type { LightBridgeConnectBalanceItem } from '@/api/lightbridge-connect'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { convertFromPayload } from '@/utils/authconv'
 import type { OutputFormat } from '@/utils/authconv'
 import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, AdminDataPayload } from '@/types'
+import { isProgressiveFeatureEnabled, ProgressiveFeatures } from '@/utils/progressiveFeatures'
+import { moduleEntityPanelContributions, type RegisteredModuleEntityPanel } from '@/modules/runtime/registry'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const scheduledTestsFeatureEnabled = computed(() => isProgressiveFeatureEnabled(ProgressiveFeatures.scheduledTests))
+const ScheduledTestsPanel = defineAsyncComponent(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
+const ModuleAccountFormsHost = defineAsyncComponent(() => import('@/modules/runtime/ModuleAccountFormsHost.vue'))
+const ModuleEntityPanelHost = defineAsyncComponent(() => import('@/modules/runtime/ModuleEntityPanelHost.vue'))
+const moduleRuntimeFeatureEnabled = computed(() => isProgressiveFeatureEnabled(ProgressiveFeatures.moduleRuntime))
+const lightBridgeConnectFeatureEnabled = computed(() => isProgressiveFeatureEnabled(ProgressiveFeatures.lightbridgeConnect))
+const accountEntityPanels = computed(() => moduleEntityPanelContributions.value.filter((panel) => panel.entity === 'account' && (!panel.requiresAdmin || authStore.isAdmin)))
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
@@ -548,6 +571,9 @@ const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
+const showModuleEntityPanel = ref(false)
+const selectedModuleEntityPanel = shallowRef<RegisteredModuleEntityPanel | null>(null)
+const modulePanelAccount = shallowRef<Account | null>(null)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
@@ -623,6 +649,11 @@ const lbcBalanceReqSeq = ref(0)
 const lbcSyncingAccountId = ref<number | null>(null)
 
 const refreshLbcBalancesBatch = async () => {
+  if (!lightBridgeConnectFeatureEnabled.value) {
+    ++lbcBalanceReqSeq.value
+    lbcBalanceByAccountId.value = {}
+    return
+  }
   const accountIDs = accounts.value.map(account => account.id)
   const reqSeq = ++lbcBalanceReqSeq.value
   if (accountIDs.length === 0) {
@@ -630,6 +661,7 @@ const refreshLbcBalancesBatch = async () => {
     return
   }
   try {
+    const { lightBridgeConnectAPI } = await import('@/api/lightbridge-connect')
     const items = await lightBridgeConnectAPI.batchBalances(accountIDs)
     if (reqSeq !== lbcBalanceReqSeq.value) return
     const next: Record<string, LightBridgeConnectBalanceItem> = {}
@@ -1737,6 +1769,7 @@ const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = nul
 const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }
 const handleViewStats = (a: Account) => { statsAcc.value = a; showStats.value = true }
 const handleSchedule = async (a: Account) => {
+  if (!scheduledTestsFeatureEnabled.value) return
   scheduleAcc.value = a
   scheduleModelOptions.value = []
   showSchedulePanel.value = true
@@ -1748,6 +1781,20 @@ const handleSchedule = async (a: Account) => {
   }
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
+const handleOpenModulePanel = (panel: RegisteredModuleEntityPanel, account: Account) => {
+  selectedModuleEntityPanel.value = panel
+  modulePanelAccount.value = account
+  showModuleEntityPanel.value = true
+}
+const closeModuleEntityPanel = () => {
+  showModuleEntityPanel.value = false
+  selectedModuleEntityPanel.value = null
+  modulePanelAccount.value = null
+}
+const handleModuleEntityPanelUpdated = () => {
+  closeModuleEntityPanel()
+  reload()
+}
 const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
 const handleRefresh = async (a: Account) => {
   try {
@@ -1804,9 +1851,10 @@ const handleSetPrivacy = async (a: Account) => {
 }
 // 手动同步单个 New API 账号余额（调用上游实时拉取 + 写库），随后刷新展示。
 const handleSyncLbcBalance = async (a: Account) => {
-  if (lbcSyncingAccountId.value === a.id) return
+  if (!lightBridgeConnectFeatureEnabled.value || lbcSyncingAccountId.value === a.id) return
   lbcSyncingAccountId.value = a.id
   try {
+    const { lightBridgeConnectAPI } = await import('@/api/lightbridge-connect')
     const result = await lightBridgeConnectAPI.syncQuota(a.id)
     const prev = lbcBalanceByAccountId.value[String(a.id)]
     lbcBalanceByAccountId.value = {

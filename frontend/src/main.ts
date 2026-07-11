@@ -4,6 +4,7 @@ import App from './App.vue'
 import router, { syncProgressiveRoutes } from './router'
 import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
+import { hydrateProgressiveFeatureManifest } from '@/utils/progressiveFeatures'
 import './style.css'
 
 function initThemeClass() {
@@ -27,9 +28,10 @@ async function bootstrap() {
   const appStore = useAppStore()
   appStore.initFromInjectedConfig()
 
-  // Register progressive routes before mount using injected public settings.
-  // Disabled modules stay out of the matcher, so their chunks are not fetched.
-  syncProgressiveRoutes()
+  // Resolve the backend feature catalog before registering optional routes.
+  // Bootstrap remains resilient against older or temporarily unavailable backends.
+  await hydrateProgressiveFeatureManifest().catch(() => undefined)
+  await syncProgressiveRoutes()
 
   // Set document title immediately after config is loaded
   if (appStore.siteName && appStore.siteName !== 'LightBridge') {

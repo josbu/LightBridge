@@ -492,3 +492,42 @@ func TestGatewayServiceRecordUsage_ReasoningEffortNil(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog)
 	require.Nil(t, usageRepo.lastLog.ReasoningEffort)
 }
+
+func TestGatewayServiceRecordUsage_MissingPricingCreatesPendingRecoveryRecord(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+	)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_missing_pricing",
+			Usage: ClaudeUsage{
+				InputTokens:  900,
+				OutputTokens: 120,
+			},
+			Model:    "definitely-unpriced-model-lightbridge-test",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 510, Quota: 100, Group: &Group{RateMultiplier: 1}},
+		User:    &User{ID: 610},
+		Account: &Account{ID: 710, Platform: PlatformAnthropic},
+	})
+
+	require.ErrorIs(t, err, ErrUsagePricingPending)
+	require.Zero(t, usageRepo.calls)
+	require.Zero(t, billingRepo.calls)
+	require.Equal(t, 1, billingRepo.pricingFailureCalls)
+	require.NotNil(t, billingRepo.lastPricingFailure)
+	require.Equal(t, "gateway_missing_pricing", billingRepo.lastPricingFailure.RequestID)
+	require.Equal(t, UsagePricingFailureProtocolGateway, billingRepo.lastPricingFailure.Protocol)
+	require.Equal(t, PlatformAnthropic, billingRepo.lastPricingFailure.Platform)
+	require.Equal(t, "definitely-unpriced-model-lightbridge-test", billingRepo.lastPricingFailure.BillingModel)
+	require.Equal(t, 900, billingRepo.lastPricingFailure.InputTokens)
+	require.Equal(t, 120, billingRepo.lastPricingFailure.OutputTokens)
+	require.Contains(t, billingRepo.lastPricingFailure.PricingError, "pricing")
+}

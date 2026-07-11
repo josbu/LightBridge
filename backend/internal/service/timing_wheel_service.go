@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -52,11 +53,35 @@ func (s *TimingWheelService) Schedule(name string, delay time.Duration, fn func(
 	}
 }
 
-// ScheduleRecurring schedules a recurring task
+// ScheduleRecurring schedules a recurring task until it is explicitly removed.
 func (s *TimingWheelService) ScheduleRecurring(name string, interval time.Duration, fn func()) {
+	s.ScheduleRecurringContext(context.Background(), name, interval, fn)
+}
+
+// ScheduleRecurringContext schedules a recurring task whose re-registration is
+// cancelled with ctx. Checking cancellation both before execution and before
+// SetTimer closes the race where Cancel removed a timer while its callback was
+// already running and the callback then resurrected itself.
+func (s *TimingWheelService) ScheduleRecurringContext(ctx context.Context, name string, interval time.Duration, fn func()) {
+	if s == nil || s.tw == nil || interval <= 0 || fn == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var schedule func()
 	schedule = func() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		fn()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if err := s.tw.SetTimer(name, schedule, interval); err != nil {
 			logger.LegacyPrintf("service.timing_wheel", "[TimingWheel] recurring SetTimer failed for %q: %v", name, err)
 		}

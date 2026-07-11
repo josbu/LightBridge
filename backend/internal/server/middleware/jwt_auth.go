@@ -57,6 +57,10 @@ func jwtAuth(authService *service.AuthService, userService jwtUserReader, activi
 			return
 		}
 
+		if !validateJWTRequestScope(c, claims) {
+			return
+		}
+
 		// 从数据库获取最新的用户信息
 		user, err := userService.GetByID(c.Request.Context(), claims.UserID)
 		if err != nil {
@@ -88,6 +92,47 @@ func jwtAuth(authService *service.AuthService, userService jwtUserReader, activi
 
 		c.Next()
 	}
+}
+
+func validateJWTRequestScope(c *gin.Context, claims *service.JWTClaims) bool {
+	if claims == nil || strings.TrimSpace(claims.Scope) == "" {
+		return true
+	}
+	if claims.Scope != service.JWTTokenScopePaymentEmbed {
+		AbortWithError(c, 403, "TOKEN_SCOPE_FORBIDDEN", "Token scope is not allowed")
+		return false
+	}
+
+	path := ""
+	if c.Request != nil && c.Request.URL != nil {
+		path = c.Request.URL.Path
+	}
+	if path != "/api/v1/payment" && !strings.HasPrefix(path, "/api/v1/payment/") {
+		AbortWithError(c, 403, "TOKEN_SCOPE_FORBIDDEN", "Embedded payment token is restricted to payment APIs")
+		return false
+	}
+
+	origin := ""
+	if c.Request != nil {
+		origin = strings.TrimSpace(c.Request.Header.Get("Origin"))
+	}
+	if origin == "" || !jwtAudienceContains(claims, origin) {
+		AbortWithError(c, 403, "TOKEN_AUDIENCE_MISMATCH", "Embedded payment token origin does not match")
+		return false
+	}
+	return true
+}
+
+func jwtAudienceContains(claims *service.JWTClaims, audience string) bool {
+	if claims == nil || audience == "" {
+		return false
+	}
+	for _, candidate := range claims.Audience {
+		if candidate == audience {
+			return true
+		}
+	}
+	return false
 }
 
 // Deprecated: prefer GetAuthSubjectFromContext in auth_subject.go.

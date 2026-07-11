@@ -54,9 +54,11 @@ type OpsMetricsCollector struct {
 	lastCgroupCPUUsageNanos uint64
 	lastCgroupCPUSampleAt   time.Time
 
-	stopCh    chan struct{}
-	startOnce sync.Once
-	stopOnce  sync.Once
+	lifecycleMu     sync.Mutex
+	lifecycleCancel context.CancelFunc
+	lifecycleWG     sync.WaitGroup
+	running         bool
+	stopped         bool
 
 	skipLogMu sync.Mutex
 	skipLogAt time.Time
@@ -87,37 +89,67 @@ func (c *OpsMetricsCollector) Start() {
 	if c == nil {
 		return
 	}
-	c.startOnce.Do(func() {
-		if c.stopCh == nil {
-			c.stopCh = make(chan struct{})
-		}
-		go c.run()
-	})
+	c.lifecycleMu.Lock()
+	if c.running || c.stopped {
+		c.lifecycleMu.Unlock()
+		return
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	c.lifecycleCancel = cancel
+	c.running = true
+	c.lifecycleWG.Add(1)
+	c.lifecycleMu.Unlock()
+
+	go func() {
+		defer c.lifecycleWG.Done()
+		c.run(runCtx)
+		c.lifecycleMu.Lock()
+		c.running = false
+		c.lifecycleMu.Unlock()
+	}()
 }
 
 func (c *OpsMetricsCollector) Stop() {
 	if c == nil {
 		return
 	}
-	c.stopOnce.Do(func() {
-		if c.stopCh != nil {
-			close(c.stopCh)
-		}
-	})
+	c.lifecycleMu.Lock()
+	if c.stopped {
+		c.lifecycleMu.Unlock()
+		c.lifecycleWG.Wait()
+		return
+	}
+	c.stopped = true
+	cancel := c.lifecycleCancel
+	c.lifecycleCancel = nil
+	c.lifecycleMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	// collectOnce uses the same context and a ten-second hard ceiling. Waiting here
+	// prevents Redis/DB pools from being closed while a sampling goroutine is still
+	// using them during graceful shutdown.
+	c.lifecycleWG.Wait()
 }
 
-func (c *OpsMetricsCollector) run() {
+func (c *OpsMetricsCollector) run(ctx context.Context) {
 	// First run immediately so the dashboard has data soon after startup.
-	c.collectOnce()
+	c.collectOnce(ctx)
 
 	for {
 		interval := c.getInterval()
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
-			c.collectOnce()
-		case <-c.stopCh:
-			timer.Stop()
+			c.collectOnce(ctx)
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			return
 		}
 	}
@@ -155,7 +187,7 @@ func (c *OpsMetricsCollector) getInterval() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func (c *OpsMetricsCollector) collectOnce() {
+func (c *OpsMetricsCollector) collectOnce(parent context.Context) {
 	if c == nil {
 		return
 	}
@@ -169,7 +201,10 @@ func (c *OpsMetricsCollector) collectOnce() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsMetricsCollectorTimeout)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsMetricsCollectorTimeout)
 	defer cancel()
 
 	if !c.isMonitoringEnabled(ctx) {
@@ -259,35 +294,74 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	windowEnd := now.Truncate(time.Minute)
 	windowStart := windowEnd.Add(-1 * time.Minute)
 
-	sys, err := c.collectSystemStats(ctx)
-	if err != nil {
+	// These collectors are independent I/O operations. Running them concurrently
+	// keeps the sampling latency close to the slowest query instead of the sum of
+	// every database, Redis and system probe. Go is a better fit than an FFI
+	// boundary here because the workload is I/O-bound rather than CPU-bound.
+	var (
+		sys                                    *opsCollectedSystemStats
+		systemErr                              error
+		dbOK, redisOK                          bool
+		active, idle                           int
+		redisTotal, redisIdle                  int
+		redisStatsOK                           bool
+		successCount, tokenConsumed            int64
+		usageCountsErr                         error
+		duration, ttft                         opsCollectedPercentiles
+		usageLatencyErr                        error
+		errorTotal, businessLimited, errorSLA  int64
+		upstreamExcl, upstream429, upstream529 int64
+		errorCountsErr                         error
+		accountSwitchCount                     int64
+		accountSwitchErr                       error
+		concurrencyQueueDepth                  *int
+	)
+	var wg sync.WaitGroup
+	wg.Add(8)
+	go func() { defer wg.Done(); sys, systemErr = c.collectSystemStats(ctx) }()
+	go func() { defer wg.Done(); dbOK = c.checkDB(ctx); active, idle = c.dbPoolStats() }()
+	go func() {
+		defer wg.Done()
+		redisOK = c.checkRedis(ctx)
+		redisTotal, redisIdle, redisStatsOK = c.redisPoolStats()
+	}()
+	go func() {
+		defer wg.Done()
+		successCount, tokenConsumed, usageCountsErr = c.queryUsageCounts(ctx, windowStart, windowEnd)
+	}()
+	go func() {
+		defer wg.Done()
+		duration, ttft, usageLatencyErr = c.queryUsageLatency(ctx, windowStart, windowEnd)
+	}()
+	go func() {
+		defer wg.Done()
+		errorTotal, businessLimited, errorSLA, upstreamExcl, upstream429, upstream529, errorCountsErr = c.queryErrorCounts(ctx, windowStart, windowEnd)
+	}()
+	go func() {
+		defer wg.Done()
+		accountSwitchCount, accountSwitchErr = c.queryAccountSwitchCount(ctx, windowStart, windowEnd)
+	}()
+	go func() { defer wg.Done(); concurrencyQueueDepth = c.collectConcurrencyQueueDepth(ctx) }()
+	wg.Wait()
+
+	if systemErr != nil {
 		// Continue; system stats are best-effort.
-		log.Printf("[OpsMetricsCollector] system stats error: %v", err)
+		log.Printf("[OpsMetricsCollector] system stats error: %v", systemErr)
 	}
-
-	dbOK := c.checkDB(ctx)
-	redisOK := c.checkRedis(ctx)
-	active, idle := c.dbPoolStats()
-	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
-
-	successCount, tokenConsumed, err := c.queryUsageCounts(ctx, windowStart, windowEnd)
-	if err != nil {
-		return fmt.Errorf("query usage counts: %w", err)
+	if usageCountsErr != nil {
+		return fmt.Errorf("query usage counts: %w", usageCountsErr)
 	}
-
-	duration, ttft, err := c.queryUsageLatency(ctx, windowStart, windowEnd)
-	if err != nil {
-		return fmt.Errorf("query usage latency: %w", err)
+	if usageLatencyErr != nil {
+		return fmt.Errorf("query usage latency: %w", usageLatencyErr)
 	}
-
-	errorTotal, businessLimited, errorSLA, upstreamExcl, upstream429, upstream529, err := c.queryErrorCounts(ctx, windowStart, windowEnd)
-	if err != nil {
-		return fmt.Errorf("query error counts: %w", err)
+	if errorCountsErr != nil {
+		return fmt.Errorf("query error counts: %w", errorCountsErr)
 	}
-
-	accountSwitchCount, err := c.queryAccountSwitchCount(ctx, windowStart, windowEnd)
-	if err != nil {
-		return fmt.Errorf("query account switch counts: %w", err)
+	if accountSwitchErr != nil {
+		return fmt.Errorf("query account switch counts: %w", accountSwitchErr)
+	}
+	if sys == nil {
+		sys = &opsCollectedSystemStats{}
 	}
 
 	windowSeconds := windowEnd.Sub(windowStart).Seconds()
@@ -299,7 +373,6 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	tps := float64(tokenConsumed) / windowSeconds
 
 	goroutines := runtime.NumGoroutine()
-	concurrencyQueueDepth := c.collectConcurrencyQueueDepth(ctx)
 
 	input := &OpsInsertSystemMetricsInput{
 		CreatedAt:     windowEnd,

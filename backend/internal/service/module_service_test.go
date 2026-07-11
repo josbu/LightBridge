@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/WilliamWang1721/LightBridge/internal/modules"
+	"github.com/stretchr/testify/require"
 )
 
 type moduleServiceMemoryStore struct {
@@ -335,6 +336,11 @@ func TestUIManifestIncludesLocalizedRouteMenuAndAccountFormText(t *testing.T) {
 					ProviderID:    "anthropic-oauth",
 					ExposedModule: "./AnthropicOAuthAccountForm",
 				}},
+				EntityPanels: []modules.FrontendEntityPanelSpec{{
+					Entity:        "account",
+					Title:         "Provider status",
+					ExposedModule: "./AnthropicOAuthAccountPanel",
+				}},
 			},
 		},
 		InstalledAt: now,
@@ -359,6 +365,9 @@ func TestUIManifestIncludesLocalizedRouteMenuAndAccountFormText(t *testing.T) {
 	}
 	if got := items[0].AccountForms[0].ProviderNameI18n["zh-CN"]; got != "Anthropic OAuth 提供商" {
 		t.Fatalf("expected localized account form provider name, got %q", got)
+	}
+	if got := items[0].EntityPanels[0].Entity; got != "account" {
+		t.Fatalf("expected account entity panel, got %q", got)
 	}
 }
 
@@ -419,4 +428,39 @@ func writeModuleArchivePlaceholder(t *testing.T, dir string, name string) string
 		t.Fatalf("write archive placeholder: %v", err)
 	}
 	return "file://" + path
+}
+
+func TestResolveEnabledAssetRestrictsVersionAndSymlinkEscapes(t *testing.T) {
+	dataDir := t.TempDir()
+	moduleID := "example.module"
+	version := "1.0.0"
+	installPath := modules.InstallDir(dataDir, moduleID, version)
+	require.NoError(t, os.MkdirAll(installPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(installPath, "remoteEntry.js"), []byte("ok"), 0o644))
+
+	store := &moduleServiceMemoryStore{items: []modules.InstalledModule{{
+		ID: moduleID, Version: version, Status: modules.ModuleStatusEnabled, InstallPath: installPath,
+	}}}
+	svc := NewModuleService(store)
+	svc.moduleDataDir = dataDir
+
+	asset, err := svc.ResolveEnabledAsset(context.Background(), moduleID, version, "remoteEntry.js")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(installPath, "remoteEntry.js"), asset)
+
+	_, err = svc.ResolveEnabledAsset(context.Background(), moduleID, "0.9.0", "remoteEntry.js")
+	require.Error(t, err)
+	_, err = svc.ResolveEnabledAsset(context.Background(), moduleID, version, "../remoteEntry.js")
+	require.Error(t, err)
+
+	outside := filepath.Join(dataDir, "outside.js")
+	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o644))
+	if err := os.Symlink(outside, filepath.Join(installPath, "escape.js")); err == nil {
+		_, err = svc.ResolveEnabledAsset(context.Background(), moduleID, version, "escape.js")
+		require.Error(t, err)
+	}
+
+	store.items[0].Status = modules.ModuleStatusDisabled
+	_, err = svc.ResolveEnabledAsset(context.Background(), moduleID, version, "remoteEntry.js")
+	require.Error(t, err)
 }

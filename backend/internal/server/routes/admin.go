@@ -20,7 +20,7 @@ func RegisterAdminRoutes(
 	admin.Use(gin.HandlerFunc(adminAuth))
 	{
 		// 仪表盘
-		registerDashboardRoutes(admin, h)
+		registerDashboardRoutes(admin, h, settingService)
 
 		// 用户管理
 		registerUserManagementRoutes(admin, h)
@@ -29,7 +29,7 @@ func RegisterAdminRoutes(
 		registerGroupRoutes(admin, h)
 
 		// 账号管理
-		registerAccountRoutes(admin, h)
+		registerAccountRoutes(admin, h, settingService)
 
 		// 公告管理
 		registerAnnouncementRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureAnnouncements), h)
@@ -67,10 +67,10 @@ func RegisterAdminRoutes(
 		registerDataManagementRoutes(admin, h)
 
 		// 数据库备份恢复
-		registerBackupRoutes(admin, h)
+		registerBackupRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureBackup), h)
 
 		// 运维监控（Ops）
-		registerOpsRoutes(admin, h)
+		registerOpsRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureOpsMonitoring), h)
 
 		// 系统管理
 		registerSystemRoutes(admin, h)
@@ -79,7 +79,7 @@ func RegisterAdminRoutes(
 		registerSubscriptionRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureSubscriptions), h)
 
 		// 使用记录管理
-		registerUsageRoutes(admin, h)
+		registerUsageRoutes(admin, h, settingService)
 
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
@@ -94,7 +94,7 @@ func RegisterAdminRoutes(
 		registerAdminAPIKeyRoutes(admin, h)
 
 		// 定时测试计划
-		registerScheduledTestRoutes(admin, h)
+		registerScheduledTestRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureScheduledTests), h)
 
 		// 渠道管理
 		registerChannelRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureChannelPricing), h)
@@ -114,7 +114,7 @@ func RegisterAdminRoutes(
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureAffiliate), h)
 
-		registerAdminModuleRoutes(admin, h)
+		registerAdminModuleRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureModuleRuntime), h)
 
 		registerUIThemeRoutes(admin, h)
 	}
@@ -263,7 +263,7 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers, settingService *service.SettingService) {
 	dashboard := admin.Group("/dashboard")
 	{
 		dashboard.GET("/snapshot-v2", h.Admin.Dashboard.GetSnapshotV2)
@@ -278,7 +278,7 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
-		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
+		dashboard.POST("/aggregation/backfill", middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureDashboardAggregation), h.Admin.Dashboard.BackfillAggregation)
 	}
 }
 
@@ -332,7 +332,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, settingService *service.SettingService) {
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
@@ -378,8 +378,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 
 		// LightBridge Connect (New API deep integration)
 		// 批量余额查询为静态路径，与 /:id 同级（参考 /data、/batch 等既有静态兄弟路由）。
-		accounts.POST("/lightbridge-connect/batch-balances", h.Admin.LightBridgeConnect.BatchBalances)
+		lbcFeature := middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureLightBridgeConnect)
+		accounts.POST("/lightbridge-connect/batch-balances", lbcFeature, h.Admin.LightBridgeConnect.BatchBalances)
 		lbc := accounts.Group("/:id/lightbridge-connect")
+		lbc.Use(lbcFeature)
 		{
 			lbc.POST("/verify-token", h.Admin.LightBridgeConnect.VerifyToken)
 			lbc.GET("/quota", h.Admin.LightBridgeConnect.GetQuota)
@@ -538,6 +540,7 @@ func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/features/runtime", h.Setting.GetFeatureRuntimeStatus)
 	adminSettings := admin.Group("/settings")
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
@@ -658,16 +661,18 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/users/:id/subscriptions", h.Admin.Subscription.ListByUser)
 }
 
-func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers, settingService *service.SettingService) {
 	usage := admin.Group("/usage")
 	{
 		usage.GET("", h.Admin.Usage.List)
 		usage.GET("/stats", h.Admin.Usage.Stats)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
-		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
-		usage.POST("/cleanup-tasks", h.Admin.Usage.CreateCleanupTask)
-		usage.POST("/cleanup-tasks/:id/cancel", h.Admin.Usage.CancelCleanupTask)
+		cleanup := usage.Group("/cleanup-tasks")
+		cleanup.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureUsageCleanup))
+		cleanup.GET("", h.Admin.Usage.ListCleanupTasks)
+		cleanup.POST("", h.Admin.Usage.CreateCleanupTask)
+		cleanup.POST("/:id/cancel", h.Admin.Usage.CancelCleanupTask)
 	}
 }
 

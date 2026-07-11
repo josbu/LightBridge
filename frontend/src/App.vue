@@ -9,6 +9,7 @@ import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore }
 import { getSetupStatus } from '@/api/setup'
 import { syncProgressiveRoutes } from '@/router'
 import {
+  hydrateProgressiveFeatureManifest,
   isProgressiveFeatureEnabled,
   isProgressivePathDisabled,
   ProgressiveFeatures,
@@ -37,8 +38,9 @@ function redirectDisabledProgressiveRoute() {
 // routes from the matcher and leave disabled pages immediately.
 watch(
   () => appStore.cachedPublicSettings,
-  () => {
-    syncProgressiveRoutes()
+  async () => {
+    await hydrateProgressiveFeatureManifest(true).catch(() => undefined)
+    await syncProgressiveRoutes()
     redirectDisabledProgressiveRoute()
   },
 )
@@ -153,10 +155,11 @@ onMounted(async () => {
 
   // Load public settings into appStore (will be cached for other components)
   await appStore.fetchPublicSettings()
+  await hydrateProgressiveFeatureManifest(true).catch(() => undefined)
 
   // SSR 注入缺失时，public settings 通过异步接口才到位；此处依据最新值再同步一次
   // 渐进式路由的注册状态（与 main.ts 的同步互补，确保两条通道都被覆盖）。
-  syncProgressiveRoutes()
+  await syncProgressiveRoutes()
   redirectDisabledProgressiveRoute()
 
   // Re-resolve document title now that siteName is available

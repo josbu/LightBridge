@@ -83,6 +83,20 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	})
 
+	t.Run("scoped_admin_token_rejected", func(t *testing.T) {
+		token, _, _, err := authService.GeneratePaymentEmbedToken(admin, "https://pay.example.com")
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Origin", "https://pay.example.com")
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusForbidden, w.Code)
+		require.Contains(t, w.Body.String(), "TOKEN_SCOPE_FORBIDDEN")
+	})
+
 	t.Run("websocket_token_version_mismatch_rejected", func(t *testing.T) {
 		token, err := authService.GenerateToken(&service.User{
 			ID:           admin.ID,

@@ -316,7 +316,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 
 	// 创建带 TLS 指纹的 Transport
 	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
-	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
+	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile, s.shouldValidateResolvedIP())
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
@@ -469,7 +469,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	}
 
 	// 缓存未命中或需要重建，创建新客户端
-	transport, err := buildUpstreamTransport(settings, parsedProxy, protocolMode)
+	transport, err := buildUpstreamTransport(settings, parsedProxy, protocolMode, s.shouldValidateResolvedIP())
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build transport: %w", err)
@@ -1049,8 +1049,10 @@ func defaultPoolSettings(cfg *config.Config) poolSettings {
 //   - MaxConnsPerHost: 每主机最大连接数（达到后新请求等待）
 //   - IdleConnTimeout: 空闲连接超时（超时后关闭）
 //   - ResponseHeaderTimeout: 等待响应头超时（不影响流式传输）
-func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMode string) (*http.Transport, error) {
+func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMode string, validateResolvedIP bool) (*http.Transport, error) {
+	baseDialer := (&net.Dialer{}).DialContext
 	transport := &http.Transport{
+		DialContext:           baseDialer,
 		MaxIdleConns:          settings.maxIdleConns,
 		MaxIdleConnsPerHost:   settings.maxIdleConnsPerHost,
 		MaxConnsPerHost:       settings.maxConnsPerHost,
@@ -1067,6 +1069,9 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		// 显式禁用 HTTP/2，确保代理不兼容场景回退到 HTTP/1.1。
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+	}
+	if proxyURL == nil && validateResolvedIP {
+		transport.DialContext = urlvalidator.NewValidatedDialContext(nil, baseDialer)
 	}
 	if err := proxyutil.ConfigureTransportProxy(transport, proxyURL); err != nil {
 		return nil, err
@@ -1090,7 +1095,7 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 //   - nil/空: 直连，使用 TLSFingerprintDialer
 //   - http/https: HTTP 代理，使用 HTTPProxyDialer（CONNECT 隧道 + utls 握手）
 //   - socks5: SOCKS5 代理，使用 SOCKS5ProxyDialer（SOCKS5 隧道 + utls 握手）
-func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *url.URL, profile *tlsfingerprint.Profile) (*http.Transport, error) {
+func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *url.URL, profile *tlsfingerprint.Profile, validateResolvedIP bool) (*http.Transport, error) {
 	transport := &http.Transport{
 		MaxIdleConns:          settings.maxIdleConns,
 		MaxIdleConnsPerHost:   settings.maxIdleConnsPerHost,
@@ -1103,9 +1108,18 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 
 	// 根据代理类型选择合适的 TLS 指纹 Dialer
 	if proxyURL == nil {
-		// 直连：使用 TLSFingerprintDialer
+		// 直连：把 uTLS 建立在已解析并校验过的精确 IP 连接上，
+		// 同时仍使用原始 addr 完成 SNI 和证书校验。
 		slog.Debug("tls_fingerprint_transport_direct")
-		dialer := tlsfingerprint.NewDialer(profile, nil)
+		var baseDialer urlvalidator.DialContextFunc
+		if validateResolvedIP {
+			baseDialer = urlvalidator.NewValidatedDialContext(nil, (&net.Dialer{}).DialContext)
+			// DialTLSContext protects HTTPS requests. DialContext must use the same
+			// validated dialer as well so an explicitly allowed plain-HTTP custom
+			// upstream cannot bypass SSRF protection.
+			transport.DialContext = baseDialer
+		}
+		dialer := tlsfingerprint.NewDialer(profile, baseDialer)
 		transport.DialTLSContext = dialer.DialTLSContext
 	} else {
 		scheme := strings.ToLower(proxyURL.Scheme)

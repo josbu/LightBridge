@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -87,12 +86,6 @@ func ProvideModuleService(
 		marketplaceRegistryURL:  marketplaceRegistryURL,
 		marketplaceTimeout:      marketplaceTimeout,
 	}
-	if err := svc.AutoInstallManagedProviderModules(context.Background()); err != nil {
-		slog.Error("failed to auto install managed provider modules", "error", err)
-	}
-	if err := svc.StartEnabledModules(context.Background()); err != nil {
-		slog.Error("failed to restore enabled modules", "error", err)
-	}
 	return svc
 }
 
@@ -105,6 +98,7 @@ type ModuleUIManifestItem struct {
 	Routes         []ModuleUIRouteSpec       `json:"routes,omitempty"`
 	Menu           []ModuleUIMenuSpec        `json:"menu,omitempty"`
 	AccountForms   []ModuleUIAccountFormSpec `json:"accountForms,omitempty"`
+	EntityPanels   []ModuleUIEntityPanelSpec `json:"entityPanels,omitempty"`
 }
 
 type ModuleUIRouteSpec struct {
@@ -134,6 +128,18 @@ type ModuleUIAccountFormSpec struct {
 	ModuleVersion    string                `json:"moduleVersion,omitempty"`
 	RemoteEntry      string                `json:"remoteEntry"`
 	ExposedModule    string                `json:"exposedModule"`
+}
+
+type ModuleUIEntityPanelSpec struct {
+	Entity        string                `json:"entity"`
+	Title         string                `json:"title"`
+	TitleI18n     modules.LocalizedText `json:"title_i18n,omitempty"`
+	ModuleID      string                `json:"moduleId"`
+	ModuleVersion string                `json:"moduleVersion"`
+	RemoteEntry   string                `json:"remoteEntry"`
+	ExposedModule string                `json:"exposedModule"`
+	RequiresAdmin bool                  `json:"requiresAdmin,omitempty"`
+	Order         int                   `json:"order,omitempty"`
 }
 
 type ModuleProviderAdapterStatus struct {
@@ -1152,6 +1158,19 @@ func (s *ModuleService) UIManifest(ctx context.Context) ([]ModuleUIManifestItem,
 				ExposedModule:    form.ExposedModule,
 			})
 		}
+		for _, panel := range frontend.EntityPanels {
+			uiItem.EntityPanels = append(uiItem.EntityPanels, ModuleUIEntityPanelSpec{
+				Entity:        panel.Entity,
+				Title:         panel.Title,
+				TitleI18n:     panel.TitleI18n,
+				ModuleID:      item.ID,
+				ModuleVersion: item.Version,
+				RemoteEntry:   remoteEntry,
+				ExposedModule: panel.ExposedModule,
+				RequiresAdmin: panel.RequiresAdmin,
+				Order:         panel.Order,
+			})
+		}
 		result = append(result, uiItem)
 	}
 	return result, nil
@@ -1216,4 +1235,81 @@ func publicModuleAssetPath(moduleID, version, rel string) string {
 		cleanRel = ""
 	}
 	return path.Join("/modules", moduleID, version, cleanRel)
+}
+
+// StopEnabledModuleRuntimes stops runtime resources for modules whose desired
+// status remains enabled. It is used during process shutdown or when the whole
+// module-runtime feature is disabled; persisted module status is intentionally
+// unchanged so the next eligible boot can restore the same modules.
+func (s *ModuleService) StopEnabledModuleRuntimes(ctx context.Context) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	installed, err := s.store.ListInstalled(ctx)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, item := range installed {
+		if item.Status != modules.ModuleStatusEnabled {
+			continue
+		}
+		if err := s.stopModuleRuntime(ctx, item.ID); err != nil {
+			failures = append(failures, fmt.Errorf("stop module %s: %w", item.ID, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// ResolveEnabledAsset resolves a frontend asset for the currently enabled
+// module version. Both the declared install root and the final file target are
+// evaluated through symlinks and must remain inside the module package.
+func (s *ModuleService) ResolveEnabledAsset(ctx context.Context, moduleID, version, relativePath string) (string, error) {
+	moduleID = strings.TrimSpace(moduleID)
+	version = strings.TrimSpace(version)
+	if moduleID == "" || strings.ContainsAny(moduleID, `/\\`) {
+		return "", infraerrors.BadRequest("MODULE_ASSET_INVALID", "module id is invalid")
+	}
+	if version == "" || strings.ContainsAny(version, `/\\`) {
+		return "", infraerrors.BadRequest("MODULE_ASSET_INVALID", "module version is invalid")
+	}
+	cleanRelative := filepath.Clean(strings.TrimPrefix(relativePath, "/"))
+	if cleanRelative == "." || cleanRelative == "" || filepath.IsAbs(cleanRelative) || cleanRelative == ".." || strings.HasPrefix(cleanRelative, ".."+string(filepath.Separator)) {
+		return "", infraerrors.BadRequest("MODULE_ASSET_INVALID", "module asset path is invalid")
+	}
+
+	installed, err := s.store.GetInstalled(ctx, moduleID)
+	if err != nil {
+		return "", mapModuleStoreError(err, moduleID)
+	}
+	if installed.Status != modules.ModuleStatusEnabled || installed.Version != version {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found")
+	}
+
+	dataDir := "data"
+	if s != nil && strings.TrimSpace(s.moduleDataDir) != "" {
+		dataDir = strings.TrimSpace(s.moduleDataDir)
+	}
+	installPath, err := validateModuleInstallPath(dataDir, installed.ID, installed.Version, installed.InstallPath)
+	if err != nil {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found").WithCause(err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(installPath)
+	if err != nil {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found").WithCause(err)
+	}
+	candidate := filepath.Join(installPath, cleanRelative)
+	resolvedTarget, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found").WithCause(err)
+	}
+	within, err := filepath.Rel(resolvedRoot, resolvedTarget)
+	if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) || filepath.IsAbs(within) {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found")
+	}
+	info, err := os.Stat(resolvedTarget)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", infraerrors.NotFound("MODULE_ASSET_NOT_FOUND", "module asset was not found")
+	}
+	return resolvedTarget, nil
 }

@@ -99,18 +99,76 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
   }'
 ```
 
-### 4) 购买页 / 自定义页面 URL Query 透传（iframe / 新窗口一致）
-当 LightBridge 打开 `purchase_subscription_url` 或用户侧自定义页面 iframe URL 时，会统一追加：
+### 4) 购买页 / 自定义页面嵌入协议
+LightBridge 打开用户侧自定义页面 iframe 时，只会在 URL 中追加非敏感上下文：
 - `user_id`
-- `token`
 - `theme`（`light` / `dark`）
-- `lang`（例如 `zh` / `en`，用于向嵌入页传递当前界面语言）
+- `lang`（例如 `zh` / `en`）
 - `ui_mode`（固定 `embedded`）
+- `src_host`
+- `src_url`（仅包含 LightBridge 的 origin 与 pathname，不包含 query/hash）
 
-示例：
+登录 JWT **不会**进入 iframe URL，也不会直接交给外部页面。LightBridge 会先通过同源接口 `POST /api/v1/auth/embed-token` 换取一个 5 分钟有效的专用 token，再通过 `postMessage` 发送给 iframe。该 token：
+- scope 固定为 `payment_embed`；
+- audience 绑定 iframe 的精确 origin；
+- 服务端只允许访问 `/api/v1/payment` 与 `/api/v1/payment/**`；
+- 不能访问普通用户、管理员、OAuth 或签发 token 的接口；
+- 不能被旧 access-token 刷新流程升级为普通登录 token。
+
+这样可避免登录凭据进入浏览器历史、反向代理日志、统计系统、Referrer 或第三方页面持久化存储。
+
+示例 iframe URL：
 ```text
-https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=embedded
+https://pay.example.com/pay?user_id=123&theme=light&lang=zh&ui_mode=embedded&src_host=https%3A%2F%2Flightbridge.example.com
 ```
+
+嵌入页应在消息监听器准备好后向父窗口发送 ready 消息：
+```js
+window.parent.postMessage(
+  { type: 'lightbridge:embed-ready' },
+  'https://lightbridge.example.com',
+)
+```
+
+LightBridge 会确认消息来源正是当前 iframe，并要求目标使用 HTTPS（本地开发的 localhost/127.0.0.1/::1 允许 HTTP），然后向 iframe 的**精确 origin**发送认证消息：
+```js
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://lightbridge.example.com') return
+  if (event.data?.type !== 'lightbridge:embed-auth') return
+  if (event.data?.version !== 1) return
+  if (event.data?.scope !== 'payment_embed') return
+
+  const { token, expires_at, user_id, theme, lang, src_host } = event.data
+  // token 只保存在内存中；不要写入 URL、日志或 localStorage。
+  // token 到期前可再次发送 lightbridge:embed-ready 请求刷新。
+})
+```
+
+认证消息格式：
+```json
+{
+  "type": "lightbridge:embed-auth",
+  "version": 1,
+  "token": "<short-lived-payment-embed-jwt>",
+  "scope": "payment_embed",
+  "expires_at": 1783766400000,
+  "user_id": 123,
+  "theme": "light",
+  "lang": "zh",
+  "src_host": "https://lightbridge.example.com"
+}
+```
+
+嵌入页调用支付 API 时使用：
+```js
+await fetch('https://lightbridge.example.com/api/v1/payment/config', {
+  headers: { Authorization: `Bearer ${token}` },
+})
+```
+
+浏览器会自动附带 iframe 页面的 `Origin`。LightBridge 会把该 Origin 与 token audience 精确比较，因此部署时还需要把支付页 origin 加入 LightBridge 的 CORS allowlist。服务端脚本可以伪造 Origin，所以 audience 绑定主要用于浏览器隔离；真正的最小权限仍由 `payment_embed` scope 和支付路由白名单保证。
+
+“新标签页打开”不会传递任何 LightBridge token；外部页面应使用自己的登录流程或服务端专用支付会话。
 
 ### 5) 失败处理建议
 - 支付成功与充值成功分状态落库
@@ -219,18 +277,76 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
   }'
 ```
 
-### 4) Purchase / Custom Page URL query forwarding (iframe and new tab)
-When LightBridge opens `purchase_subscription_url` or a user-facing custom page iframe URL, it appends:
+### 4) Purchase / custom-page embed protocol
+When LightBridge opens a user-facing custom page iframe, it appends only non-sensitive context to the URL:
 - `user_id`
-- `token`
 - `theme` (`light` / `dark`)
-- `lang` (for example `zh` / `en`, used to pass the current UI language to the embedded page)
+- `lang` (for example `zh` / `en`)
 - `ui_mode` (fixed: `embedded`)
+- `src_host`
+- `src_url` (LightBridge origin and pathname only; query/hash are excluded)
 
-Example:
+The login JWT is **never** placed in the iframe URL or handed directly to the external page. LightBridge first exchanges it through the same-origin `POST /api/v1/auth/embed-token` endpoint for a dedicated five-minute token and sends that token with `postMessage`. The token:
+- has the fixed `payment_embed` scope;
+- is audience-bound to the iframe's exact origin;
+- is accepted server-side only on `/api/v1/payment` and `/api/v1/payment/**`;
+- cannot access normal user, admin, OAuth, or token-issuing endpoints; and
+- cannot be upgraded into a normal login token through the legacy access-token refresh flow.
+
+This keeps login credentials out of browser history, reverse-proxy logs, analytics systems, referrers, and third-party persistent storage.
+
+Example iframe URL:
 ```text
-https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=embedded
+https://pay.example.com/pay?user_id=123&theme=light&lang=zh&ui_mode=embedded&src_host=https%3A%2F%2Flightbridge.example.com
 ```
+
+After installing its message listener, the embedded page should announce readiness to the parent:
+```js
+window.parent.postMessage(
+  { type: 'lightbridge:embed-ready' },
+  'https://lightbridge.example.com',
+)
+```
+
+LightBridge verifies that the message came from the current iframe, requires HTTPS (HTTP is allowed only for localhost/127.0.0.1/::1 development origins), and sends an authentication message to the iframe's **exact origin**:
+```js
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://lightbridge.example.com') return
+  if (event.data?.type !== 'lightbridge:embed-auth') return
+  if (event.data?.version !== 1) return
+  if (event.data?.scope !== 'payment_embed') return
+
+  const { token, expires_at, user_id, theme, lang, src_host } = event.data
+  // Keep the token in memory only. Never put it in a URL, log, or localStorage.
+  // Send lightbridge:embed-ready again before expiry to request a refreshed token.
+})
+```
+
+Authentication message schema:
+```json
+{
+  "type": "lightbridge:embed-auth",
+  "version": 1,
+  "token": "<short-lived-payment-embed-jwt>",
+  "scope": "payment_embed",
+  "expires_at": 1783766400000,
+  "user_id": 123,
+  "theme": "light",
+  "lang": "zh",
+  "src_host": "https://lightbridge.example.com"
+}
+```
+
+Use the token for payment APIs:
+```js
+await fetch('https://lightbridge.example.com/api/v1/payment/config', {
+  headers: { Authorization: `Bearer ${token}` },
+})
+```
+
+The browser automatically sends the iframe page's `Origin`. LightBridge compares it exactly with the token audience, so the payment-page origin must also be present in LightBridge's CORS allowlist. A server-side client can forge an Origin header; audience binding is therefore a browser-isolation control, while the `payment_embed` scope and payment-route allowlist provide the actual least-privilege boundary.
+
+Opening the page in a new tab transfers no LightBridge token. The external page must use its own login flow or a dedicated server-issued payment session.
 
 ### 5) Failure handling recommendations
 - Persist payment success and recharge success as separate states

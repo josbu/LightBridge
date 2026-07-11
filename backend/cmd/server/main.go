@@ -9,7 +9,6 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -134,10 +133,12 @@ func runSetupServer() {
 func runMainServer() {
 	cfg, err := config.LoadForBootstrap()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Failed to load config: %v", err)
+		return
 	}
 	if err := logger.Init(logger.OptionsFromConfig(cfg.Log)); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		log.Printf("Failed to initialize logger: %v", err)
+		return
 	}
 	if cfg.RunMode == config.RunModeSimple {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
@@ -150,31 +151,54 @@ func runMainServer() {
 
 	app, err := initializeApplication(buildInfo)
 	if err != nil {
-		log.Fatalf("Failed to initialize application: %v", err)
+		log.Printf("Failed to initialize application: %v", err)
+		return
 	}
 	defer app.Cleanup()
 
-	// 启动服务器
+	serverErr := make(chan error, 1)
 	go func() {
-		if err := app.Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Failed to start server: %v", err)
+		err := app.Server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
+		serverErr <- err
 	}()
 
 	log.Printf("Server started on %s", app.Server.Addr)
 
-	// 等待中断信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 
-	log.Println("Shutting down server...")
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			log.Printf("Server stopped unexpectedly: %v", err)
+		} else {
+			log.Println("Server stopped")
+		}
+		return
+	case <-signalCtx.Done():
+		log.Println("Shutting down server...")
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelShutdown()
 
-	if err := app.Server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	if err := app.Server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Graceful server shutdown failed: %v", err)
+		if closeErr := app.Server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+			log.Printf("Forced server close failed: %v", closeErr)
+		}
+	}
+
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			log.Printf("Server exit error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		log.Println("Server listener did not report exit before cleanup")
 	}
 
 	log.Println("Server exited")

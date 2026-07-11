@@ -15,8 +15,6 @@ func TestValidateManifest_AllowsOutboundProxyModule(t *testing.T) {
 		Version:    "0.1.0",
 		Capabilities: []Capability{
 			CapabilityOutboundAdapter,
-			CapabilityUIAdminRoute,
-			CapabilityUIEntityPanel,
 			CapabilityEntityBinding,
 		},
 		Backend: &BackendSpec{Entrypoints: map[string]string{"outbound": "./proxy-module"}},
@@ -48,4 +46,24 @@ func TestValidateManifest_RejectsUnsupportedModuleType(t *testing.T) {
 	}
 
 	require.ErrorContains(t, ValidateManifest(manifest), "unsupported module type")
+}
+
+func TestValidateManifest_RequiresEntityPanelContribution(t *testing.T) {
+	manifest := Manifest{
+		APIVersion:   ManifestAPIVersionV1Alpha1,
+		ID:           "example.provider",
+		Name:         "Example",
+		Type:         ModuleTypeProvider,
+		Version:      "0.1.0",
+		Capabilities: []Capability{CapabilityUIEntityPanel},
+		Frontend:     &FrontendSpec{Entry: "frontend/remoteEntry.js"},
+	}
+
+	require.ErrorContains(t, ValidateManifest(manifest), "requires at least one entity panel")
+	manifest.Frontend.EntityPanels = []FrontendEntityPanelSpec{{
+		Entity:        "account",
+		Title:         "Provider status",
+		ExposedModule: "./AccountStatus",
+	}}
+	require.NoError(t, ValidateManifest(manifest))
 }

@@ -437,6 +437,54 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	})
 }
 
+type CreateEmbedTokenRequest struct {
+	Audience string `json:"audience" binding:"required"`
+}
+
+type CreateEmbedTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+	Audience    string `json:"audience"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+// CreatePaymentEmbedToken issues a short-lived token for an external payment
+// iframe. The JWT middleware restricts it to payment routes and the exact
+// browser origin supplied here.
+func (h *AuthHandler) CreatePaymentEmbedToken(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	var req CreateEmbedTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	token, audience, expiresIn, err := h.authService.GeneratePaymentEmbedToken(user, req.Audience)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Success(c, CreateEmbedTokenResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		Scope:       service.JWTTokenScopePaymentEmbed,
+		Audience:    audience,
+		ExpiresIn:   expiresIn,
+	})
+}
+
 // ValidatePromoCodeRequest 验证优惠码请求
 type ValidatePromoCodeRequest struct {
 	Code string `json:"code" binding:"required"`

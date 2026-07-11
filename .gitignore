@@ -138,6 +138,9 @@ docs/*
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/RELEASE_NOTES_v*.md
+!docs/architecture/
+!docs/architecture/*.md
+!docs/architecture/CODEBASE_INVENTORY.tsv
 .serena/
 .codex/
 frontend/coverage/

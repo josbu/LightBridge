@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,11 @@ var (
 // maxTokenLength 限制 token 大小，避免超长 header 触发解析时的异常内存分配。
 const maxTokenLength = 8192
 
+const (
+	JWTTokenScopePaymentEmbed = "payment_embed"
+	paymentEmbedTokenTTL      = 5 * time.Minute
+)
+
 // refreshTokenPrefix is the prefix for refresh tokens to distinguish them from access tokens.
 const refreshTokenPrefix = "rt_"
 
@@ -57,6 +63,7 @@ type JWTClaims struct {
 	Email        string `json:"email"`
 	Role         string `json:"role"`
 	TokenVersion int64  `json:"token_version"` // Used to invalidate tokens on password change
+	Scope        string `json:"scope,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -1086,6 +1093,10 @@ func buildEmailSuffixNotAllowedError(whitelist []string) error {
 
 // ValidateToken 验证JWT token并返回用户声明
 func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
+	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.JWT.Secret) == "" {
+		return nil, ErrInvalidToken
+	}
+
 	// 先做长度校验，尽早拒绝异常超长 token，降低 DoS 风险。
 	if len(tokenString) > maxTokenLength {
 		return nil, ErrTokenTooLarge
@@ -1148,6 +1159,13 @@ func isReservedEmail(email string) bool {
 // GenerateToken 生成JWT access token
 // 使用新的access_token_expire_minutes配置项（如果配置了），否则回退到expire_hour
 func (s *AuthService) GenerateToken(user *User) (string, error) {
+	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.JWT.Secret) == "" {
+		return "", errors.New("jwt secret is not configured")
+	}
+	if user == nil {
+		return "", errors.New("user is required")
+	}
+
 	now := time.Now()
 	var expiresAt time.Time
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
@@ -1176,6 +1194,76 @@ func (s *AuthService) GenerateToken(user *User) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+// GeneratePaymentEmbedToken creates a short-lived, audience-bound token for
+// external payment pages. Unlike a normal access token, middleware restricts
+// this token to /api/v1/payment routes and requires the browser Origin to match
+// the audience claim.
+func (s *AuthService) GeneratePaymentEmbedToken(user *User, rawAudience string) (tokenString, audience string, expiresIn int, err error) {
+	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.JWT.Secret) == "" {
+		return "", "", 0, errors.New("jwt secret is not configured")
+	}
+	if user == nil {
+		return "", "", 0, errors.New("user is required")
+	}
+	audience, err = normalizeEmbedAudience(rawAudience)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(paymentEmbedTokenTTL)
+	tokenID, err := randomHexString(16)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("generate embed token id: %w", err)
+	}
+	claims := &JWTClaims{
+		UserID:       user.ID,
+		Email:        user.Email,
+		Role:         user.Role,
+		TokenVersion: resolvedTokenVersion(user),
+		Scope:        JWTTokenScopePaymentEmbed,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{audience},
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        tokenID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			Subject:   strconv.FormatInt(user.ID, 10),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err = token.SignedString([]byte(s.cfg.JWT.Secret))
+	if err != nil {
+		return "", "", 0, fmt.Errorf("sign embed token: %w", err)
+	}
+	return tokenString, audience, int(paymentEmbedTokenTTL / time.Second), nil
+}
+
+func normalizeEmbedAudience(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("valid embed audience origin is required")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return "", errors.New("embed audience must be an origin without path, query, fragment, or credentials")
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	hostname := strings.ToLower(parsed.Hostname())
+	if scheme != "https" {
+		isLocalhost := hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1"
+		if scheme != "http" || !isLocalhost {
+			return "", errors.New("embed audience must use https (http is allowed only for localhost)")
+		}
+	}
+
+	parsed.Scheme = scheme
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Path = ""
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 // GetAccessTokenExpiresIn 返回Access Token的有效期（秒）
@@ -1208,6 +1296,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 	claims, err := s.ValidateToken(oldTokenString)
 	if err != nil && !errors.Is(err, ErrTokenExpired) {
 		return "", err
+	}
+	if claims == nil || strings.TrimSpace(claims.Scope) != "" {
+		return "", ErrInvalidToken
 	}
 
 	// 获取最新的用户信息

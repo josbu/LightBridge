@@ -17,7 +17,7 @@ import (
 const (
 	defaultUsageRecordWorkerCount          = 128
 	defaultUsageRecordQueueSize            = 16384
-	defaultUsageRecordTaskTimeoutSeconds   = 5
+	defaultUsageRecordTaskTimeoutSeconds   = 30
 	defaultUsageRecordOverflowPolicy       = config.UsageRecordOverflowPolicySync
 	defaultUsageRecordOverflowSampleRatio  = 10
 	defaultUsageRecordAutoScaleEnabled     = true
@@ -29,7 +29,6 @@ const (
 	defaultUsageRecordAutoScaleDownStep    = 16
 	defaultUsageRecordAutoScaleInterval    = 3 * time.Second
 	defaultUsageRecordAutoScaleCooldown    = 10 * time.Second
-	usageRecordDropLogInterval             = 5 * time.Second
 )
 
 // UsageRecordTask 是提交到使用量记录池的任务。
@@ -65,44 +64,44 @@ type UsageRecordWorkerPoolOptions struct {
 
 // UsageRecordWorkerPoolStats 使用量记录池运行时统计。
 type UsageRecordWorkerPoolStats struct {
-	MaxConcurrency     int
-	RunningWorkers     int64
-	WaitingTasks       uint64
-	SubmittedTasks     uint64
-	CompletedTasks     uint64
-	SuccessfulTasks    uint64
-	FailedTasks        uint64
-	DroppedTasks       uint64
-	DroppedQueueFull   uint64
-	DroppedPoolStopped uint64
-	SyncFallbackTasks  uint64
+	MaxConcurrency          int
+	RunningWorkers          int64
+	WaitingTasks            uint64
+	SubmittedTasks          uint64
+	CompletedTasks          uint64
+	SuccessfulTasks         uint64
+	FailedTasks             uint64
+	DroppedTasks            uint64
+	DroppedQueueFull        uint64
+	DroppedPoolStopped      uint64
+	SyncFallbackTasks       uint64
+	SyncFallbackQueueFull   uint64
+	SyncFallbackPoolStopped uint64
 }
 
 // UsageRecordWorkerPool 提供“有界队列 + 固定 worker”的异步执行器。
 // 用于替代请求路径里的直接 goroutine，避免高并发时无界堆积。
 type UsageRecordWorkerPool struct {
-	pool                  pond.Pool
-	taskTimeout           time.Duration
-	overflowPolicy        string
-	overflowSamplePercent int
-	overflowCounter       atomic.Uint64
-	droppedQueueFull      atomic.Uint64
-	droppedPoolStopped    atomic.Uint64
-	syncFallback          atomic.Uint64
-	lastDropLogNanos      atomic.Int64
-	autoScaleEnabled      bool
-	autoScaleMinWorkers   int
-	autoScaleMaxWorkers   int
-	autoScaleUpPercent    int
-	autoScaleDownPercent  int
-	autoScaleUpStep       int
-	autoScaleDownStep     int
-	autoScaleInterval     time.Duration
-	autoScaleCooldown     time.Duration
-	lastScaleNanos        atomic.Int64
-	autoScaleCancel       context.CancelFunc
-	lifecycleWg           sync.WaitGroup
-	stopOnce              sync.Once
+	pool                    pond.Pool
+	taskTimeout             time.Duration
+	droppedQueueFull        atomic.Uint64
+	droppedPoolStopped      atomic.Uint64
+	syncFallback            atomic.Uint64
+	syncFallbackQueueFull   atomic.Uint64
+	syncFallbackPoolStopped atomic.Uint64
+	autoScaleEnabled        bool
+	autoScaleMinWorkers     int
+	autoScaleMaxWorkers     int
+	autoScaleUpPercent      int
+	autoScaleDownPercent    int
+	autoScaleUpStep         int
+	autoScaleDownStep       int
+	autoScaleInterval       time.Duration
+	autoScaleCooldown       time.Duration
+	lastScaleNanos          atomic.Int64
+	autoScaleCancel         context.CancelFunc
+	lifecycleWg             sync.WaitGroup
+	stopOnce                sync.Once
 }
 
 // NewUsageRecordWorkerPool 从配置构建使用量记录池。
@@ -116,18 +115,16 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 	opts = normalizeUsageRecordPoolOptions(opts)
 
 	p := &UsageRecordWorkerPool{
-		taskTimeout:           opts.TaskTimeout,
-		overflowPolicy:        opts.OverflowPolicy,
-		overflowSamplePercent: opts.OverflowSamplePercent,
-		autoScaleEnabled:      opts.AutoScaleEnabled,
-		autoScaleMinWorkers:   opts.AutoScaleMinWorkers,
-		autoScaleMaxWorkers:   opts.AutoScaleMaxWorkers,
-		autoScaleUpPercent:    opts.AutoScaleUpPercent,
-		autoScaleDownPercent:  opts.AutoScaleDownPercent,
-		autoScaleUpStep:       opts.AutoScaleUpStep,
-		autoScaleDownStep:     opts.AutoScaleDownStep,
-		autoScaleInterval:     opts.AutoScaleInterval,
-		autoScaleCooldown:     opts.AutoScaleCooldown,
+		taskTimeout:          opts.TaskTimeout,
+		autoScaleEnabled:     opts.AutoScaleEnabled,
+		autoScaleMinWorkers:  opts.AutoScaleMinWorkers,
+		autoScaleMaxWorkers:  opts.AutoScaleMaxWorkers,
+		autoScaleUpPercent:   opts.AutoScaleUpPercent,
+		autoScaleDownPercent: opts.AutoScaleDownPercent,
+		autoScaleUpStep:      opts.AutoScaleUpStep,
+		autoScaleDownStep:    opts.AutoScaleDownStep,
+		autoScaleInterval:    opts.AutoScaleInterval,
+		autoScaleCooldown:    opts.AutoScaleCooldown,
 	}
 
 	p.pool = pond.NewPool(
@@ -141,46 +138,34 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 }
 
 // Submit 提交一个使用量记录任务。
-// 提交失败（队列满）时按 overflowPolicy 执行降级策略：drop/sample/sync。
+// 使用量任务包含扣费、订阅额度和账号配额更新，属于不可丢失的商业状态。
+// 队列不可用、已经停止或已满时，调用方会同步执行任务作为可靠性兜底。
+// drop/sample 配置仅为旧配置兼容保留，不再允许丢弃有效任务。
 func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMode {
 	if p == nil || task == nil {
 		return UsageRecordSubmitModeDropped
 	}
 	if p.pool == nil || p.pool.Stopped() {
-		p.droppedPoolStopped.Add(1)
-		p.logDrop("stopped")
-		return UsageRecordSubmitModeDropped
+		p.syncFallback.Add(1)
+		p.syncFallbackPoolStopped.Add(1)
+		p.execute(task)
+		return UsageRecordSubmitModeSync
 	}
 
-	_, ok := p.pool.TrySubmit(func() {
+	if _, ok := p.pool.TrySubmit(func() {
 		p.execute(task)
-	})
-	if ok {
+	}); ok {
 		return UsageRecordSubmitModeEnqueued
 	}
 
+	p.syncFallback.Add(1)
 	if p.pool.Stopped() {
-		p.droppedPoolStopped.Add(1)
-		p.logDrop("stopped")
-		return UsageRecordSubmitModeDropped
+		p.syncFallbackPoolStopped.Add(1)
+	} else {
+		p.syncFallbackQueueFull.Add(1)
 	}
-
-	switch p.overflowPolicy {
-	case config.UsageRecordOverflowPolicySync:
-		p.syncFallback.Add(1)
-		p.execute(task)
-		return UsageRecordSubmitModeSync
-	case config.UsageRecordOverflowPolicySample:
-		if p.shouldSyncFallback() {
-			p.syncFallback.Add(1)
-			p.execute(task)
-			return UsageRecordSubmitModeSync
-		}
-	}
-
-	p.droppedQueueFull.Add(1)
-	p.logDrop("full")
-	return UsageRecordSubmitModeDropped
+	p.execute(task)
+	return UsageRecordSubmitModeSync
 }
 
 // Stats 返回当前池状态与计数器。
@@ -189,17 +174,19 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 		return UsageRecordWorkerPoolStats{}
 	}
 	return UsageRecordWorkerPoolStats{
-		MaxConcurrency:     p.pool.MaxConcurrency(),
-		RunningWorkers:     p.pool.RunningWorkers(),
-		WaitingTasks:       p.pool.WaitingTasks(),
-		SubmittedTasks:     p.pool.SubmittedTasks(),
-		CompletedTasks:     p.pool.CompletedTasks(),
-		SuccessfulTasks:    p.pool.SuccessfulTasks(),
-		FailedTasks:        p.pool.FailedTasks(),
-		DroppedTasks:       p.pool.DroppedTasks(),
-		DroppedQueueFull:   p.droppedQueueFull.Load(),
-		DroppedPoolStopped: p.droppedPoolStopped.Load(),
-		SyncFallbackTasks:  p.syncFallback.Load(),
+		MaxConcurrency:          p.pool.MaxConcurrency(),
+		RunningWorkers:          p.pool.RunningWorkers(),
+		WaitingTasks:            p.pool.WaitingTasks(),
+		SubmittedTasks:          p.pool.SubmittedTasks(),
+		CompletedTasks:          p.pool.CompletedTasks(),
+		SuccessfulTasks:         p.pool.SuccessfulTasks(),
+		FailedTasks:             p.pool.FailedTasks(),
+		DroppedTasks:            p.pool.DroppedTasks(),
+		DroppedQueueFull:        p.droppedQueueFull.Load(),
+		DroppedPoolStopped:      p.droppedPoolStopped.Load(),
+		SyncFallbackTasks:       p.syncFallback.Load(),
+		SyncFallbackQueueFull:   p.syncFallbackQueueFull.Load(),
+		SyncFallbackPoolStopped: p.syncFallbackPoolStopped.Load(),
 	}
 }
 
@@ -306,16 +293,12 @@ func (p *UsageRecordWorkerPool) resizePool(current, target, queuePercent, waitin
 	).Info("usage_record.auto_scale")
 }
 
-func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
-	if p.overflowSamplePercent <= 0 {
-		return false
-	}
-	n := p.overflowCounter.Add(1)
-	return int((n-1)%100) < p.overflowSamplePercent
-}
-
 func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
-	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
+	timeout := p.taskTimeout
+	if timeout <= 0 {
+		timeout = time.Duration(defaultUsageRecordTaskTimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	defer func() {
@@ -328,29 +311,6 @@ func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
 	}()
 
 	task(ctx)
-}
-
-func (p *UsageRecordWorkerPool) logDrop(reason string) {
-	now := time.Now().UnixNano()
-	last := p.lastDropLogNanos.Load()
-	if now-last < int64(usageRecordDropLogInterval) {
-		return
-	}
-	if !p.lastDropLogNanos.CompareAndSwap(last, now) {
-		return
-	}
-
-	stats := p.Stats()
-	logger.L().With(
-		zap.String("component", "service.usage_record_worker_pool"),
-		zap.String("reason", reason),
-		zap.String("overflow_policy", p.overflowPolicy),
-		zap.Int64("running_workers", stats.RunningWorkers),
-		zap.Uint64("waiting_tasks", stats.WaitingTasks),
-		zap.Uint64("dropped_queue_full", stats.DroppedQueueFull),
-		zap.Uint64("dropped_pool_stopped", stats.DroppedPoolStopped),
-		zap.Uint64("sync_fallback_tasks", stats.SyncFallbackTasks),
-	).Warn("usage_record.task_dropped")
 }
 
 func usageRecordPoolOptionsFromConfig(cfg *config.Config) UsageRecordWorkerPoolOptions {
@@ -426,11 +386,13 @@ func normalizeUsageRecordPoolOptions(opts UsageRecordWorkerPoolOptions) UsageRec
 	if opts.TaskTimeout <= 0 {
 		opts.TaskTimeout = time.Duration(defaultUsageRecordTaskTimeoutSeconds) * time.Second
 	}
+	// drop/sample are accepted by Config validation for backward compatibility,
+	// but billing work is never allowed to use a lossy overflow policy.
 	switch strings.ToLower(strings.TrimSpace(opts.OverflowPolicy)) {
 	case config.UsageRecordOverflowPolicyDrop,
 		config.UsageRecordOverflowPolicySample,
 		config.UsageRecordOverflowPolicySync:
-		opts.OverflowPolicy = strings.ToLower(strings.TrimSpace(opts.OverflowPolicy))
+		opts.OverflowPolicy = config.UsageRecordOverflowPolicySync
 	default:
 		opts.OverflowPolicy = defaultUsageRecordOverflowPolicy
 	}
@@ -439,9 +401,6 @@ func normalizeUsageRecordPoolOptions(opts UsageRecordWorkerPoolOptions) UsageRec
 	}
 	if opts.OverflowSamplePercent > 100 {
 		opts.OverflowSamplePercent = 100
-	}
-	if opts.OverflowPolicy == config.UsageRecordOverflowPolicySample && opts.OverflowSamplePercent == 0 {
-		opts.OverflowSamplePercent = defaultUsageRecordOverflowSampleRatio
 	}
 	if opts.AutoScaleEnabled {
 		if opts.AutoScaleMinWorkers <= 0 {

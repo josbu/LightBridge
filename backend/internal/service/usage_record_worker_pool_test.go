@@ -38,7 +38,7 @@ func TestUsageRecordWorkerPool_SubmitEnqueued(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestUsageRecordWorkerPool_OverflowDrop(t *testing.T) {
+func TestUsageRecordWorkerPool_LegacyDropPolicyFallsBackSynchronously(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
 		WorkerCount:           1,
 		QueueSize:             1,
@@ -51,6 +51,7 @@ func TestUsageRecordWorkerPool_OverflowDrop(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{})
 	secondDone := make(chan struct{})
+	var fallbackExecuted atomic.Bool
 
 	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
 		close(started)
@@ -61,7 +62,11 @@ func TestUsageRecordWorkerPool_OverflowDrop(t *testing.T) {
 	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
 		close(secondDone)
 	}))
-	require.Equal(t, UsageRecordSubmitModeDropped, pool.Submit(func(ctx context.Context) {}))
+	mode := pool.Submit(func(ctx context.Context) {
+		fallbackExecuted.Store(true)
+	})
+	require.Equal(t, UsageRecordSubmitModeSync, mode)
+	require.True(t, fallbackExecuted.Load())
 
 	close(block)
 	select {
@@ -71,7 +76,8 @@ func TestUsageRecordWorkerPool_OverflowDrop(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return pool.Stats().DroppedQueueFull >= 1
+		stats := pool.Stats()
+		return stats.SyncFallbackQueueFull >= 1 && stats.DroppedQueueFull == 0
 	}, time.Second, 10*time.Millisecond)
 }
 
@@ -118,7 +124,7 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
+func TestUsageRecordWorkerPool_LegacySamplePolicyNeverDrops(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
 		WorkerCount:           1,
 		QueueSize:             1,
@@ -131,7 +137,7 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 	block := make(chan struct{})
 	started := make(chan struct{})
 	secondDone := make(chan struct{})
-	var syncExecuted atomic.Bool
+	var synchronousExecutions atomic.Int32
 
 	require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
 		close(started)
@@ -143,14 +149,13 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 		close(secondDone)
 	}))
 
-	firstOverflow := pool.Submit(func(ctx context.Context) {
-		syncExecuted.Store(true)
-	})
-	require.Equal(t, UsageRecordSubmitModeSync, firstOverflow)
-	require.True(t, syncExecuted.Load())
-
-	secondOverflow := pool.Submit(func(ctx context.Context) {})
-	require.Equal(t, UsageRecordSubmitModeDropped, secondOverflow)
+	for i := 0; i < 2; i++ {
+		mode := pool.Submit(func(ctx context.Context) {
+			synchronousExecutions.Add(1)
+		})
+		require.Equal(t, UsageRecordSubmitModeSync, mode)
+	}
+	require.EqualValues(t, 2, synchronousExecutions.Load())
 
 	close(block)
 	select {
@@ -161,11 +166,11 @@ func TestUsageRecordWorkerPool_OverflowSample(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		stats := pool.Stats()
-		return stats.SyncFallbackTasks >= 1 && stats.DroppedQueueFull >= 1
+		return stats.SyncFallbackQueueFull >= 2 && stats.DroppedQueueFull == 0
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestUsageRecordWorkerPool_SubmitAfterStop(t *testing.T) {
+func TestUsageRecordWorkerPool_SubmitAfterStopRunsSynchronously(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
 		WorkerCount:           1,
 		QueueSize:             1,
@@ -175,9 +180,15 @@ func TestUsageRecordWorkerPool_SubmitAfterStop(t *testing.T) {
 	})
 
 	pool.Stop()
-	mode := pool.Submit(func(ctx context.Context) {})
-	require.Equal(t, UsageRecordSubmitModeDropped, mode)
-	require.GreaterOrEqual(t, pool.Stats().DroppedPoolStopped, uint64(1))
+	var executed atomic.Bool
+	mode := pool.Submit(func(ctx context.Context) {
+		executed.Store(true)
+	})
+	require.Equal(t, UsageRecordSubmitModeSync, mode)
+	require.True(t, executed.Load())
+	stats := pool.Stats()
+	require.GreaterOrEqual(t, stats.SyncFallbackPoolStopped, uint64(1))
+	require.Equal(t, uint64(0), stats.DroppedPoolStopped)
 }
 
 func TestUsageRecordWorkerPool_AutoScaleUpAndDown(t *testing.T) {
@@ -412,7 +423,8 @@ func TestUsageRecordWorkerPool_NormalizeOptions_SampleAndAutoScaleDisabled(t *te
 		AutoScaleInterval:     time.Second,
 		AutoScaleCooldown:     time.Second,
 	})
-	require.Equal(t, defaultUsageRecordOverflowSampleRatio, sampleOpts.OverflowSamplePercent)
+	require.Equal(t, config.UsageRecordOverflowPolicySync, sampleOpts.OverflowPolicy)
+	require.Equal(t, 0, sampleOpts.OverflowSamplePercent)
 	require.Equal(t, 64, sampleOpts.AutoScaleMinWorkers)
 	require.Equal(t, 64, sampleOpts.AutoScaleMaxWorkers)
 	require.Equal(t, 64, sampleOpts.WorkerCount)
@@ -424,15 +436,6 @@ func TestUsageRecordWorkerPool_NormalizeOptions_SampleAndAutoScaleDisabled(t *te
 	})
 	require.Equal(t, 20, fixedOpts.AutoScaleMinWorkers)
 	require.Equal(t, 20, fixedOpts.AutoScaleMaxWorkers)
-}
-
-func TestUsageRecordWorkerPool_ShouldSyncFallbackEdgeCases(t *testing.T) {
-	pool := &UsageRecordWorkerPool{overflowSamplePercent: 0}
-	require.False(t, pool.shouldSyncFallback())
-
-	pool.overflowSamplePercent = 100
-	require.True(t, pool.shouldSyncFallback())
-	require.True(t, pool.shouldSyncFallback())
 }
 
 func TestUsageRecordWorkerPool_StatsAndStop_NilBranches(t *testing.T) {
@@ -466,7 +469,7 @@ func TestUsageRecordWorkerPool_Execute_PanicAndTimeout(t *testing.T) {
 	}
 }
 
-func TestUsageRecordWorkerPool_ResizeAndLogDropBranches(t *testing.T) {
+func TestUsageRecordWorkerPool_ResizeNoopBranch(t *testing.T) {
 	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
 		WorkerCount:      1,
 		QueueSize:        8,
@@ -479,10 +482,4 @@ func TestUsageRecordWorkerPool_ResizeAndLogDropBranches(t *testing.T) {
 	// 目标值与当前值相同，应该直接返回。
 	pool.resizePool(1, 1, 0, 0, 0, 8, "noop")
 	require.Equal(t, 1, pool.Stats().MaxConcurrency)
-
-	// 在限流窗口内应静默返回。
-	pool.lastDropLogNanos.Store(time.Now().UnixNano())
-	require.NotPanics(t, func() {
-		pool.logDrop("full")
-	})
 }

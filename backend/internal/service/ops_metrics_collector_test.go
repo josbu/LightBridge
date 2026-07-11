@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/WilliamWang1721/LightBridge/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -57,4 +58,31 @@ func TestOpsMetricsCollectorQueryErrorCountsExcludesCountTokens(t *testing.T) {
 	mock.ExpectClose()
 	require.NoError(t, db.Close())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestOpsMetricsCollectorStopJoinsWorkerAndPreventsRestart(t *testing.T) {
+	collector := NewOpsMetricsCollector(nil, nil, nil, nil, nil, nil, &config.Config{})
+	collector.Start()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		collector.lifecycleMu.Lock()
+		running := collector.running
+		collector.lifecycleMu.Unlock()
+		if running {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	collector.Stop()
+	collector.lifecycleMu.Lock()
+	require.True(t, collector.stopped)
+	require.False(t, collector.running)
+	collector.lifecycleMu.Unlock()
+
+	collector.Start()
+	collector.lifecycleMu.Lock()
+	require.False(t, collector.running, "a finalized boot collector must not restart")
+	collector.lifecycleMu.Unlock()
 }

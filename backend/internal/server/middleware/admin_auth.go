@@ -168,6 +168,11 @@ func validateJWTForAdmin(
 		return false
 	}
 
+	if strings.TrimSpace(claims.Scope) != "" {
+		AbortWithError(c, 403, "TOKEN_SCOPE_FORBIDDEN", "Scoped tokens cannot access admin APIs")
+		return false
+	}
+
 	// 从数据库获取用户
 	user, err := userService.GetByID(c.Request.Context(), claims.UserID)
 	if err != nil {

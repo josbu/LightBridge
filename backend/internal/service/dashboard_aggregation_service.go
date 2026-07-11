@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,6 +47,10 @@ type DashboardAggregationService struct {
 	cfg                  config.DashboardAggregationConfig
 	running              int32
 	lastRetentionCleanup atomic.Value // time.Time
+
+	lifecycleMu      sync.Mutex
+	lifecycleCancel  context.CancelFunc
+	lifecycleRunning bool
 }
 
 // NewDashboardAggregationService 创建聚合服务。
@@ -61,7 +66,7 @@ func NewDashboardAggregationService(repo DashboardAggregationRepository, timingW
 	}
 }
 
-// Start 启动定时聚合作业（重启生效配置）。
+// Start 启动定时聚合作业（重启生效配置）。重复调用幂等。
 func (s *DashboardAggregationService) Start() {
 	if s == nil || s.repo == nil || s.timingWheel == nil {
 		return
@@ -71,22 +76,63 @@ func (s *DashboardAggregationService) Start() {
 		return
 	}
 
+	s.lifecycleMu.Lock()
+	if s.lifecycleRunning {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	workerCtx, cancel := context.WithCancel(context.Background())
+	s.lifecycleCancel = cancel
+	s.lifecycleRunning = true
+	s.lifecycleMu.Unlock()
+
 	interval := time.Duration(s.cfg.IntervalSeconds) * time.Second
 	if interval <= 0 {
 		interval = time.Minute
 	}
 
 	if s.cfg.RecomputeDays > 0 {
-		go s.recomputeRecentDays()
+		go func() {
+			select {
+			case <-workerCtx.Done():
+				return
+			default:
+				s.recomputeRecentDays()
+			}
+		}()
 	}
 
-	s.timingWheel.ScheduleRecurring("dashboard:aggregation", interval, func() {
+	s.timingWheel.ScheduleRecurringContext(workerCtx, "dashboard:aggregation", interval, func() {
 		s.runScheduledAggregation()
 	})
 	logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合作业启动 (interval=%v, lookback=%ds)", interval, s.cfg.LookbackSeconds)
 	if !s.cfg.BackfillEnabled {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 回填已禁用，如需补齐保留窗口以外历史数据请手动回填")
 	}
+}
+
+// Stop cancels future aggregation callbacks. A callback already executing is
+// bounded by its own operation timeout and will not re-register itself.
+func (s *DashboardAggregationService) Stop() {
+	if s == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	if !s.lifecycleRunning {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	cancel := s.lifecycleCancel
+	s.lifecycleCancel = nil
+	s.lifecycleRunning = false
+	s.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if s.timingWheel != nil {
+		s.timingWheel.Cancel("dashboard:aggregation")
+	}
+	logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] stopped")
 }
 
 // TriggerBackfill 触发回填（异步）。

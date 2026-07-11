@@ -95,7 +95,7 @@ func (s *UsageCleanupService) Start() {
 
 	interval := s.workerInterval()
 	s.startOnce.Do(func() {
-		s.timingWheel.ScheduleRecurring(usageCleanupWorkerName, interval, s.runOnce)
+		s.timingWheel.ScheduleRecurringContext(s.workerCtx, usageCleanupWorkerName, interval, s.runOnce)
 		logger.LegacyPrintf("service.usage_cleanup", "[UsageCleanup] started (interval=%s max_range_days=%d batch_size=%d task_timeout=%s)", interval, s.maxRangeDays(), s.batchSize(), s.taskTimeout())
 	})
 }

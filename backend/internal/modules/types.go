@@ -55,6 +55,7 @@ type FrontendSpec struct {
 	Routes       []FrontendRouteSpec       `json:"routes,omitempty" yaml:"routes,omitempty"`
 	Menu         []FrontendMenuSpec        `json:"menu,omitempty" yaml:"menu,omitempty"`
 	AccountForms []FrontendAccountFormSpec `json:"accountForms,omitempty" yaml:"accountForms,omitempty"`
+	EntityPanels []FrontendEntityPanelSpec `json:"entityPanels,omitempty" yaml:"entityPanels,omitempty"`
 }
 type FrontendRouteSpec struct {
 	Path          string        `json:"path" yaml:"path"`
@@ -73,6 +74,14 @@ type FrontendMenuSpec struct {
 type FrontendAccountFormSpec struct {
 	ProviderID    string `json:"providerId" yaml:"providerId"`
 	ExposedModule string `json:"exposedModule" yaml:"exposedModule"`
+}
+type FrontendEntityPanelSpec struct {
+	Entity        string        `json:"entity" yaml:"entity"`
+	Title         string        `json:"title" yaml:"title"`
+	TitleI18n     LocalizedText `json:"title_i18n,omitempty" yaml:"title_i18n,omitempty"`
+	ExposedModule string        `json:"exposedModule" yaml:"exposedModule"`
+	RequiresAdmin bool          `json:"requiresAdmin,omitempty" yaml:"requiresAdmin,omitempty"`
+	Order         int           `json:"order,omitempty" yaml:"order,omitempty"`
 }
 
 type Manifest struct {
@@ -291,6 +300,57 @@ func ValidateManifest(m Manifest) error {
 	}
 	if hasCapability(m, CapabilityOutboundAdapter) && m.Backend == nil {
 		return errors.New("outbound.adapter requires backend spec")
+	}
+	if err := validateFrontendCapabilities(m); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateFrontendCapabilities(m Manifest) error {
+	if m.Frontend == nil {
+		for _, capability := range []Capability{CapabilityUIAdminRoute, CapabilityUIAccountForm, CapabilityUIEntityPanel} {
+			if hasCapability(m, capability) {
+				return fmt.Errorf("%s requires frontend spec", capability)
+			}
+		}
+		return nil
+	}
+	if strings.TrimSpace(m.Frontend.Entry) == "" {
+		return errors.New("frontend entry is required")
+	}
+	if len(m.Frontend.Routes) > 0 && !hasCapability(m, CapabilityUIAdminRoute) {
+		return errors.New("frontend routes require ui.admin.route capability")
+	}
+	if len(m.Frontend.AccountForms) > 0 && !hasCapability(m, CapabilityUIAccountForm) {
+		return errors.New("frontend account forms require ui.account.form capability")
+	}
+	if len(m.Frontend.EntityPanels) > 0 && !hasCapability(m, CapabilityUIEntityPanel) {
+		return errors.New("frontend entity panels require ui.entity.panel capability")
+	}
+	if hasCapability(m, CapabilityUIAdminRoute) && len(m.Frontend.Routes) == 0 {
+		return errors.New("ui.admin.route requires at least one frontend route")
+	}
+	if hasCapability(m, CapabilityUIAccountForm) && len(m.Frontend.AccountForms) == 0 {
+		return errors.New("ui.account.form requires at least one account form")
+	}
+	if hasCapability(m, CapabilityUIEntityPanel) && len(m.Frontend.EntityPanels) == 0 {
+		return errors.New("ui.entity.panel requires at least one entity panel")
+	}
+	for _, route := range m.Frontend.Routes {
+		if !strings.HasPrefix(strings.TrimSpace(route.Path), "/") || strings.TrimSpace(route.ExposedModule) == "" {
+			return errors.New("frontend routes require an absolute path and exposedModule")
+		}
+	}
+	for _, form := range m.Frontend.AccountForms {
+		if strings.TrimSpace(form.ProviderID) == "" || strings.TrimSpace(form.ExposedModule) == "" {
+			return errors.New("frontend account forms require providerId and exposedModule")
+		}
+	}
+	for _, panel := range m.Frontend.EntityPanels {
+		if strings.TrimSpace(panel.Entity) == "" || strings.TrimSpace(panel.ExposedModule) == "" {
+			return errors.New("frontend entity panels require entity and exposedModule")
+		}
 	}
 	return nil
 }

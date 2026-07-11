@@ -102,6 +102,19 @@ func ProvideRouter(
 // ProvideHTTPServer 提供 HTTP 服务器
 func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 	httpHandler := http.Handler(router)
+
+	globalMaxSize := cfg.Server.MaxRequestBodySize
+	if globalMaxSize <= 0 {
+		globalMaxSize = cfg.Gateway.MaxBodySize
+	}
+	if globalMaxSize > 0 {
+		httpHandler = http.MaxBytesHandler(httpHandler, globalMaxSize)
+		log.Printf("Global max request body size: %d bytes (%.2f MB)", globalMaxSize, float64(globalMaxSize)/(1<<20))
+	}
+
+	// Build the server only after all handler wrappers are installed. The old
+	// order assigned router directly to server.Handler and then replaced only the
+	// local httpHandler variable, so MaxBytesHandler never protected real traffic.
 	server := &http.Server{
 		Addr:    cfg.Server.Address(),
 		Handler: httpHandler,
@@ -111,15 +124,6 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 		IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second,
 		// 注意：不设置 WriteTimeout，因为流式响应可能持续十几分钟
 		// 不设置 ReadTimeout，因为大请求体可能需要较长时间读取
-	}
-
-	globalMaxSize := cfg.Server.MaxRequestBodySize
-	if globalMaxSize <= 0 {
-		globalMaxSize = cfg.Gateway.MaxBodySize
-	}
-	if globalMaxSize > 0 {
-		httpHandler = http.MaxBytesHandler(httpHandler, globalMaxSize)
-		log.Printf("Global max request body size: %d bytes (%.2f MB)", globalMaxSize, float64(globalMaxSize)/(1<<20))
 	}
 
 	// 根据配置决定是否启用 H2C

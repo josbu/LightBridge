@@ -1,0 +1,747 @@
+package service
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/WilliamWang1721/LightBridge/internal/pkg/logger"
+	"github.com/WilliamWang1721/LightBridge/internal/util/responseheaders"
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+type anthropicPassthroughForwardInput struct {
+	Body          []byte
+	RequestModel  string
+	OriginalModel string
+	RequestStream bool
+	StartTime     time.Time
+}
+
+func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	reqModel string,
+	originalModel string,
+	reqStream bool,
+	startTime time.Time,
+) (*ForwardResult, error) {
+	return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
+		Body:          body,
+		RequestModel:  reqModel,
+		OriginalModel: originalModel,
+		RequestStream: reqStream,
+		StartTime:     startTime,
+	})
+}
+
+func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	input anthropicPassthroughForwardInput,
+) (*ForwardResult, error) {
+	token, tokenType, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	if tokenType != "apikey" {
+		return nil, fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
+	}
+
+	proxyURL := ""
+	proxyURL, err = s.resolveAccountProxyURL(ctx, account, account.Platform, apiKeyGroupID(getAPIKeyFromContext(c)))
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the channel requires Bearer auth for Anthropic
+	useBearerAuth := false
+	if gid := apiKeyGroupID(getAPIKeyFromContext(c)); gid != nil && s.channelService != nil {
+		if ch, chErr := s.channelService.GetChannelForGroup(ctx, *gid); chErr == nil {
+			useBearerAuth = ch.IsAnthropicBearerAuthEnabled()
+		}
+	}
+
+	logger.LegacyPrintf("service.gateway", "[Anthropic 自动透传] 命中 API Key 透传分支: account=%d name=%s model=%s stream=%v",
+		account.ID, account.Name, input.RequestModel, input.RequestStream)
+
+	if c != nil {
+		c.Set("anthropic_passthrough", true)
+	}
+	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
+	input.Body = StripEmptyTextBlocks(input.Body)
+
+	var resp *http.Response
+	retryStart := time.Now()
+	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
+		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token, useBearerAuth)
+		releaseUpstreamCtx()
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			safeErr := sanitizeUpstreamErrorMessage(err.Error())
+			setOpsUpstreamError(c, 0, safeErr, "")
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:           account.EffectivePlatform(),
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: 0,
+				UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+				Passthrough:        true,
+				Kind:               "request_error",
+				Message:            safeErr,
+			})
+			c.JSON(http.StatusBadGateway, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "upstream_error",
+					"message": "Upstream request failed",
+				},
+			})
+			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+		}
+
+		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
+		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
+			if attempt < maxRetryAttempts {
+				elapsed := time.Since(retryStart)
+				if elapsed >= maxRetryElapsed {
+					break
+				}
+
+				delay := retryBackoffDelay(attempt)
+				remaining := maxRetryElapsed - elapsed
+				if delay > remaining {
+					delay = remaining
+				}
+				if delay <= 0 {
+					break
+				}
+
+				respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+				_ = resp.Body.Close()
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.EffectivePlatform(),
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: resp.StatusCode,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+					Passthrough:        true,
+					Kind:               "retry",
+					Message:            extractUpstreamErrorMessage(respBody),
+					Detail: func() string {
+						if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+							return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+						}
+						return ""
+					}(),
+				})
+				logger.LegacyPrintf("service.gateway", "Anthropic passthrough account %d: upstream error %d, retry %d/%d after %v (elapsed=%v/%v)",
+					account.ID, resp.StatusCode, attempt, maxRetryAttempts, delay, elapsed, maxRetryElapsed)
+				if err := sleepWithContext(ctx, delay); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			break
+		}
+
+		break
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, errors.New("upstream request failed: empty response")
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
+		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
+				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+
+			s.handleRetryExhaustedSideEffects(ctx, resp, account)
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:           account.EffectivePlatform(),
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Passthrough:        true,
+				Kind:               "retry_exhausted_failover",
+				Message:            extractUpstreamErrorMessage(respBody),
+				Detail: func() string {
+					if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+						return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+					}
+					return ""
+				}(),
+			})
+			return nil, &UpstreamFailoverError{
+				StatusCode:             resp.StatusCode,
+				ResponseBody:           respBody,
+				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			}
+		}
+		return s.handleRetryExhaustedError(ctx, resp, c, account)
+	}
+
+	if resp.StatusCode >= 400 && s.shouldFailoverUpstreamError(resp.StatusCode) {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
+			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+
+		s.handleFailoverSideEffects(ctx, resp, account, input.RequestModel)
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.EffectivePlatform(),
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Passthrough:        true,
+			Kind:               "failover",
+			Message:            extractUpstreamErrorMessage(respBody),
+			Detail: func() string {
+				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+					return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+				}
+				return ""
+			}(),
+		})
+		return nil, &UpstreamFailoverError{
+			StatusCode:             resp.StatusCode,
+			ResponseBody:           respBody,
+			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+		}
+	}
+
+	if resp.StatusCode >= 400 {
+		return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
+	}
+
+	var usage *ClaudeUsage
+	var firstTokenMs *int
+	var clientDisconnect bool
+	if input.RequestStream {
+		// 被动真伪检测：仅对明确开启 thinking 的请求统计 signature 命中。
+		thinkingEnabled := isThinkingEnabledPayload(input.Body)
+		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel, thinkingEnabled)
+		if err != nil {
+			return nil, err
+		}
+		usage = streamResult.usage
+		firstTokenMs = streamResult.firstTokenMs
+		clientDisconnect = streamResult.clientDisconnect
+	} else {
+		usage, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if usage == nil {
+		usage = &ClaudeUsage{}
+	}
+
+	return &ForwardResult{
+		RequestID:        resp.Header.Get("x-request-id"),
+		Usage:            *usage,
+		Model:            input.OriginalModel,
+		UpstreamModel:    input.RequestModel,
+		Stream:           input.RequestStream,
+		Duration:         time.Since(input.StartTime),
+		FirstTokenMs:     firstTokenMs,
+		ClientDisconnect: clientDisconnect,
+	}, nil
+}
+
+func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	token string,
+	useBearerAuth bool,
+) (*http.Request, error) {
+	targetURL := claudeAPIURL
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	if baseURL == "" {
+		baseURL = account.GetBaseURL()
+	}
+	if baseURL != "" {
+		validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return nil, err
+		}
+		targetURL = validatedURL + "/v1/messages?beta=true"
+	}
+
+	// 能力维度 body sanitize：透传路径上 anthropic-beta header 原样透传客户端值，
+	// 依此决定是否保留 body 中的 context_management。避免“客户端 body 带字段但
+	// header 忘记带 beta token”的客户端 bug 在透传场景下让上游 400。
+	clientBeta := ""
+	if c != nil && c.Request != nil {
+		clientBeta = getHeaderRaw(c.Request.Header, "anthropic-beta")
+	}
+	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
+		body = sanitized
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	if c != nil && c.Request != nil {
+		for key, values := range c.Request.Header {
+			lowerKey := strings.ToLower(strings.TrimSpace(key))
+			if !allowedHeaders[lowerKey] {
+				continue
+			}
+			wireKey := resolveWireCasing(key)
+			for _, v := range values {
+				addHeaderRaw(req.Header, wireKey, v)
+			}
+		}
+	}
+
+	// 覆盖入站鉴权残留，并注入上游认证
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	req.Header.Del("x-goog-api-key")
+	req.Header.Del("cookie")
+	if useBearerAuth {
+		setHeaderRaw(req.Header, "authorization", "Bearer "+token)
+	} else {
+		setHeaderRaw(req.Header, "x-api-key", token)
+	}
+
+	if getHeaderRaw(req.Header, "content-type") == "" {
+		setHeaderRaw(req.Header, "content-type", "application/json")
+	}
+	if getHeaderRaw(req.Header, "anthropic-version") == "" {
+		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
+	}
+
+	return req, nil
+}
+
+func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	startTime time.Time,
+	model string,
+	thinkingEnabled bool,
+) (*streamingResult, error) {
+	if s.rateLimitService != nil {
+		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
+	}
+
+	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "text/event-stream"
+	}
+	c.Header("Content-Type", contentType)
+	if c.Writer.Header().Get("Cache-Control") == "" {
+		c.Header("Cache-Control", "no-cache")
+	}
+	if c.Writer.Header().Get("Connection") == "" {
+		c.Header("Connection", "keep-alive")
+	}
+	c.Header("X-Accel-Buffering", "no")
+	if v := resp.Header.Get("x-request-id"); v != "" {
+		c.Header("x-request-id", v)
+	}
+
+	w := c.Writer
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, errors.New("streaming not supported")
+	}
+
+	usage := &ClaudeUsage{}
+	var firstTokenMs *int
+	clientDisconnected := false
+	sawTerminalEvent := false
+	// 被动真伪检测：跟踪响应流中是否出现合法 thinking signature。
+	sigState := &thinkingSignatureState{enabled: thinkingEnabled}
+	// 流结束后做一次被动真伪评估（仅对完整成功流；断连/错误流不计，避免误判）。
+	defer func() {
+		if sigState == nil || !sigState.enabled || clientDisconnected || !sawTerminalEvent {
+			return
+		}
+		s.evaluateAuthenticityPassive(ctx, account, sigState)
+	}()
+
+	scanner := bufio.NewScanner(resp.Body)
+	maxLineSize := defaultMaxLineSize
+	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+		maxLineSize = s.cfg.Gateway.MaxLineSize
+	}
+	scanBuf := getSSEScannerBuf64K()
+	scanner.Buffer(scanBuf[:0], maxLineSize)
+
+	type scanEvent struct {
+		line string
+		err  error
+	}
+	events := make(chan scanEvent, 16)
+	done := make(chan struct{})
+	sendEvent := func(ev scanEvent) bool {
+		select {
+		case events <- ev:
+			return true
+		case <-done:
+			return false
+		}
+	}
+	var lastReadAt int64
+	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+	go func(scanBuf *sseScannerBuf64K) {
+		defer putSSEScannerBuf64K(scanBuf)
+		defer close(events)
+		for scanner.Scan() {
+			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+			if !sendEvent(scanEvent{line: scanner.Text()}) {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			_ = sendEvent(scanEvent{err: err})
+		}
+	}(scanBuf)
+	defer close(done)
+
+	streamInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	var intervalTicker *time.Ticker
+	if streamInterval > 0 {
+		intervalTicker = time.NewTicker(streamInterval)
+		defer intervalTicker.Stop()
+	}
+	var intervalCh <-chan time.Time
+	if intervalTicker != nil {
+		intervalCh = intervalTicker.C
+	}
+
+	keepaliveInterval := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	var keepaliveTicker *time.Ticker
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+	}
+	var keepaliveCh <-chan time.Time
+	if keepaliveTicker != nil {
+		keepaliveCh = keepaliveTicker.C
+	}
+	lastDataAt := time.Now()
+	inPartialEvent := false
+
+	// resetKeepaliveTicker resets the keepalive ticker so the next tick fires
+	// keepaliveInterval after the most recent data event. This prevents stale
+	// ticks from sending pings too early or too late after upstream data.
+	resetKeepaliveTicker := func() {
+		if keepaliveTicker != nil {
+			keepaliveTicker.Reset(keepaliveInterval)
+		}
+	}
+
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				if !clientDisconnected {
+					// 兜底补刷，确保最后一个未以空行结尾的事件也能及时送达客户端。
+					flusher.Flush()
+				}
+				if !sawTerminalEvent {
+					if clientDisconnected && streamInterval > 0 {
+						lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+						if time.Since(lastRead) >= streamInterval {
+							return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
+						}
+					}
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
+				}
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+			}
+			if ev.err != nil {
+				if sawTerminalEvent {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				}
+				if clientDisconnected {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
+				}
+				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
+				}
+				if errors.Is(ev.err, bufio.ErrTooLong) {
+					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, ev.err)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, ev.err
+				}
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
+			}
+
+			line := ev.line
+			if data, ok := extractAnthropicSSEDataLine(line); ok {
+				trimmed := strings.TrimSpace(data)
+				if anthropicStreamEventIsTerminal("", trimmed) {
+					sawTerminalEvent = true
+				}
+				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
+					ms := int(time.Since(startTime).Milliseconds())
+					firstTokenMs = &ms
+				}
+				s.parseSSEUsagePassthrough(data, usage)
+				s.parseAuthenticityPassthrough(data, sigState)
+			} else {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
+					sawTerminalEvent = true
+				}
+			}
+
+			if !clientDisconnected {
+				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
+				if _, err := io.WriteString(w, restored); err != nil {
+					clientDisconnected = true
+					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+				} else if _, err := io.WriteString(w, "\n"); err != nil {
+					clientDisconnected = true
+					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+				} else if line == "" {
+					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
+					flusher.Flush()
+					lastDataAt = time.Now()
+					resetKeepaliveTicker()
+					inPartialEvent = false
+				} else {
+					inPartialEvent = true
+				}
+			}
+
+		case <-intervalCh:
+			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			if time.Since(lastRead) < streamInterval {
+				continue
+			}
+			if clientDisconnected {
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
+			}
+			logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, model, streamInterval)
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleStreamTimeout(ctx, account, model)
+			}
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
+
+		case <-keepaliveCh:
+			if clientDisconnected || inPartialEvent {
+				continue
+			}
+			if time.Since(lastDataAt) < keepaliveInterval {
+				continue
+			}
+			if _, err := fmt.Fprint(w, "event: ping\ndata: {\"type\": \"ping\"}\n\n"); err != nil {
+				clientDisconnected = true
+				logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during keepalive ping, continue draining upstream for usage: account=%d", account.ID)
+				continue
+			}
+			flusher.Flush()
+			lastDataAt = time.Now()
+		}
+	}
+}
+
+func extractAnthropicSSEDataLine(line string) (string, bool) {
+	if !strings.HasPrefix(line, "data:") {
+		return "", false
+	}
+	start := len("data:")
+	for start < len(line) {
+		if line[start] != ' ' && line[start] != '\t' {
+			break
+		}
+		start++
+	}
+	return line[start:], true
+}
+
+func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
+	if usage == nil || data == "" || data == "[DONE]" {
+		return
+	}
+
+	parsed := gjson.Parse(data)
+	switch parsed.Get("type").String() {
+	case "message_start":
+		msgUsage := parsed.Get("message.usage")
+		if msgUsage.Exists() {
+			usage.InputTokens = int(msgUsage.Get("input_tokens").Int())
+			usage.CacheCreationInputTokens = int(msgUsage.Get("cache_creation_input_tokens").Int())
+			usage.CacheReadInputTokens = int(msgUsage.Get("cache_read_input_tokens").Int())
+
+			// 保持与通用解析一致：message_start 允许覆盖 5m/1h 明细（包括 0）。
+			cc5m := msgUsage.Get("cache_creation.ephemeral_5m_input_tokens")
+			cc1h := msgUsage.Get("cache_creation.ephemeral_1h_input_tokens")
+			if cc5m.Exists() || cc1h.Exists() {
+				usage.CacheCreation5mTokens = int(cc5m.Int())
+				usage.CacheCreation1hTokens = int(cc1h.Int())
+			}
+		}
+	case "message_delta":
+		deltaUsage := parsed.Get("usage")
+		if deltaUsage.Exists() {
+			if v := deltaUsage.Get("input_tokens").Int(); v > 0 {
+				usage.InputTokens = int(v)
+			}
+			if v := deltaUsage.Get("output_tokens").Int(); v > 0 {
+				usage.OutputTokens = int(v)
+			}
+			if v := deltaUsage.Get("cache_creation_input_tokens").Int(); v > 0 {
+				usage.CacheCreationInputTokens = int(v)
+			}
+			if v := deltaUsage.Get("cache_read_input_tokens").Int(); v > 0 {
+				usage.CacheReadInputTokens = int(v)
+			}
+
+			cc5m := deltaUsage.Get("cache_creation.ephemeral_5m_input_tokens")
+			cc1h := deltaUsage.Get("cache_creation.ephemeral_1h_input_tokens")
+			if cc5m.Exists() && cc5m.Int() > 0 {
+				usage.CacheCreation5mTokens = int(cc5m.Int())
+			}
+			if cc1h.Exists() && cc1h.Int() > 0 {
+				usage.CacheCreation1hTokens = int(cc1h.Int())
+			}
+		}
+	}
+
+	if usage.CacheReadInputTokens == 0 {
+		if cached := parsed.Get("message.usage.cached_tokens").Int(); cached > 0 {
+			usage.CacheReadInputTokens = int(cached)
+		}
+		if cached := parsed.Get("usage.cached_tokens").Int(); usage.CacheReadInputTokens == 0 && cached > 0 {
+			usage.CacheReadInputTokens = int(cached)
+		}
+	}
+	if usage.CacheCreationInputTokens == 0 {
+		cc5m := parsed.Get("message.usage.cache_creation.ephemeral_5m_input_tokens").Int()
+		cc1h := parsed.Get("message.usage.cache_creation.ephemeral_1h_input_tokens").Int()
+		if cc5m == 0 && cc1h == 0 {
+			cc5m = parsed.Get("usage.cache_creation.ephemeral_5m_input_tokens").Int()
+			cc1h = parsed.Get("usage.cache_creation.ephemeral_1h_input_tokens").Int()
+		}
+		total := cc5m + cc1h
+		if total > 0 {
+			usage.CacheCreationInputTokens = int(total)
+		}
+	}
+}
+
+func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
+	usage := &ClaudeUsage{}
+	if len(body) == 0 {
+		return usage
+	}
+
+	parsed := gjson.ParseBytes(body)
+	usageNode := parsed.Get("usage")
+	if !usageNode.Exists() {
+		return usage
+	}
+
+	usage.InputTokens = int(usageNode.Get("input_tokens").Int())
+	usage.OutputTokens = int(usageNode.Get("output_tokens").Int())
+	usage.CacheCreationInputTokens = int(usageNode.Get("cache_creation_input_tokens").Int())
+	usage.CacheReadInputTokens = int(usageNode.Get("cache_read_input_tokens").Int())
+
+	cc5m := usageNode.Get("cache_creation.ephemeral_5m_input_tokens").Int()
+	cc1h := usageNode.Get("cache_creation.ephemeral_1h_input_tokens").Int()
+	if cc5m > 0 || cc1h > 0 {
+		usage.CacheCreation5mTokens = int(cc5m)
+		usage.CacheCreation1hTokens = int(cc1h)
+	}
+	if usage.CacheCreationInputTokens == 0 && (cc5m > 0 || cc1h > 0) {
+		usage.CacheCreationInputTokens = int(cc5m + cc1h)
+	}
+	if usage.CacheReadInputTokens == 0 {
+		if cached := usageNode.Get("cached_tokens").Int(); cached > 0 {
+			usage.CacheReadInputTokens = int(cached)
+		}
+	}
+	return usage
+}
+
+func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+) (*ClaudeUsage, error) {
+	if s.rateLimitService != nil {
+		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
+	}
+
+	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
+	if err != nil {
+		return nil, err
+	}
+
+	usage := parseClaudeUsageFromResponseBody(body)
+
+	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	body = reverseToolNamesIfPresent(c, body)
+	c.Data(resp.StatusCode, contentType, body)
+	return usage, nil
+}
+
+func writeAnthropicPassthroughResponseHeaders(dst http.Header, src http.Header, filter *responseheaders.CompiledHeaderFilter) {
+	if dst == nil || src == nil {
+		return
+	}
+	if filter != nil {
+		responseheaders.WriteFilteredHeaders(dst, src, filter)
+		return
+	}
+	if v := strings.TrimSpace(src.Get("Content-Type")); v != "" {
+		dst.Set("Content-Type", v)
+	}
+	if v := strings.TrimSpace(src.Get("x-request-id")); v != "" {
+		dst.Set("x-request-id", v)
+	}
+}

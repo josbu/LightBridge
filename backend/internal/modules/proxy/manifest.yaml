@@ -7,16 +7,7 @@ core:
   compatible: ">=0.1.0"
 capabilities:
   - outbound.adapter
-  - ui.admin.route
-  - ui.entity.panel
   - entity.binding
 backend:
   entrypoints:
     outbound: "./proxy-module"
-frontend:
-  entry: "/modules/lightbridge.proxy/remoteEntry.js"
-  routes:
-    - path: "/admin/proxy"
-      title: "Proxy"
-      exposedModule: "./ProxyAdmin"
-      requiresAdmin: true

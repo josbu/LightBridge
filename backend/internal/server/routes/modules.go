@@ -2,26 +2,26 @@ package routes
 
 import (
 	"github.com/WilliamWang1721/LightBridge/internal/handler"
+	"github.com/WilliamWang1721/LightBridge/internal/server/middleware"
+	"github.com/WilliamWang1721/LightBridge/internal/service"
 	"github.com/gin-gonic/gin"
-	"path/filepath"
-	"strings"
 )
 
-func RegisterModuleRoutes(v1 *gin.RouterGroup, h *handler.Handlers) {
+func RegisterModuleRoutes(v1 *gin.RouterGroup, h *handler.Handlers, settingService *service.SettingService) {
 	if h == nil || h.Module == nil {
 		return
 	}
 	modules := v1.Group("/modules")
+	modules.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureModuleRuntime))
 	modules.GET("/ui", h.Module.UIManifest)
 	modules.GET("/account-forms", h.Module.ProviderAccountForms)
 }
-func RegisterModuleAssetRoutes(r *gin.Engine, dataDir string) {
-	if strings.TrimSpace(dataDir) == "" {
-		dataDir = "data"
+
+func RegisterModuleAssetRoutes(r *gin.Engine, h *handler.Handlers, settingService *service.SettingService) {
+	if h == nil || h.Module == nil {
+		return
 	}
-	root := filepath.Join(dataDir, "modules")
-	r.GET("/modules/:module/:version/*path", func(c *gin.Context) {
-		rel := strings.TrimPrefix(c.Param("path"), "/")
-		c.File(filepath.Join(root, c.Param("module"), c.Param("version"), rel))
-	})
+	assets := r.Group("/modules")
+	assets.Use(middleware.RequireProgressiveFeature(settingService, service.ProgressiveFeatureModuleRuntime))
+	assets.GET("/:module/:version/*path", h.Module.Asset)
 }

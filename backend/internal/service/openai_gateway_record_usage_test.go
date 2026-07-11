@@ -32,11 +32,15 @@ func (s *openAIRecordUsageLogRepoStub) Create(ctx context.Context, log *UsageLog
 type openAIRecordUsageBillingRepoStub struct {
 	UsageBillingRepository
 
-	result     *UsageBillingApplyResult
-	err        error
-	calls      int
-	lastCmd    *UsageBillingCommand
-	lastCtxErr error
+	result                   *UsageBillingApplyResult
+	err                      error
+	calls                    int
+	lastCmd                  *UsageBillingCommand
+	lastCtxErr               error
+	pricingFailureErr        error
+	pricingFailureCalls      int
+	lastPricingFailure       *UsagePricingFailure
+	lastPricingFailureCtxErr error
 }
 
 func (s *openAIRecordUsageBillingRepoStub) Apply(ctx context.Context, cmd *UsageBillingCommand) (*UsageBillingApplyResult, error) {
@@ -50,6 +54,13 @@ func (s *openAIRecordUsageBillingRepoStub) Apply(ctx context.Context, cmd *Usage
 		return s.result, nil
 	}
 	return &UsageBillingApplyResult{Applied: true}, nil
+}
+
+func (s *openAIRecordUsageBillingRepoStub) RecordPricingFailure(ctx context.Context, failure *UsagePricingFailure) error {
+	s.pricingFailureCalls++
+	s.lastPricingFailure = failure
+	s.lastPricingFailureCtxErr = ctx.Err()
+	return s.pricingFailureErr
 }
 
 func TestOpenAIGatewayServiceRecordUsage_RejectsNilInput(t *testing.T) {
@@ -245,7 +256,7 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_MissingPricingCreatesPendingRecoveryRecord(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -269,31 +280,24 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 		APIKeyService: quotaSvc,
 	})
 
-	require.NoError(t, err)
-	require.Equal(t, 1, billingRepo.calls)
-	require.Equal(t, 1, usageRepo.calls)
+	require.ErrorIs(t, err, ErrUsagePricingPending)
+	require.Equal(t, 0, billingRepo.calls)
+	require.Equal(t, 0, usageRepo.calls)
 	require.Equal(t, 0, userRepo.deductCalls)
 	require.Equal(t, 0, subRepo.incrementCalls)
 	require.Equal(t, 0, quotaSvc.quotaCalls)
 	require.Equal(t, 0, quotaSvc.rateLimitCalls)
 
-	require.NotNil(t, usageRepo.lastLog)
-	require.Equal(t, "resp_missing_pricing", usageRepo.lastLog.RequestID)
-	require.Equal(t, "deepseek-v4-flash", usageRepo.lastLog.Model)
-	require.Equal(t, "deepseek-v4-flash", usageRepo.lastLog.RequestedModel)
-	require.Equal(t, 1200, usageRepo.lastLog.InputTokens)
-	require.Equal(t, 300, usageRepo.lastLog.OutputTokens)
-	require.Zero(t, usageRepo.lastLog.TotalCost)
-	require.Zero(t, usageRepo.lastLog.ActualCost)
-	require.NotNil(t, usageRepo.lastLog.BillingMode)
-	require.Equal(t, string(BillingModeToken), *usageRepo.lastLog.BillingMode)
-
-	require.NotNil(t, billingRepo.lastCmd)
-	require.Zero(t, billingRepo.lastCmd.BalanceCost)
-	require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
-	require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
-	require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
-	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
+	require.Equal(t, 1, billingRepo.pricingFailureCalls)
+	require.NoError(t, billingRepo.lastPricingFailureCtxErr)
+	require.NotNil(t, billingRepo.lastPricingFailure)
+	require.Equal(t, "resp_missing_pricing", billingRepo.lastPricingFailure.RequestID)
+	require.Equal(t, UsagePricingFailureProtocolOpenAIGateway, billingRepo.lastPricingFailure.Protocol)
+	require.Equal(t, "deepseek-v4-flash", billingRepo.lastPricingFailure.BillingModel)
+	require.Equal(t, []string{"deepseek-v4-flash"}, billingRepo.lastPricingFailure.BillingModels)
+	require.Equal(t, 1200, billingRepo.lastPricingFailure.InputTokens)
+	require.Equal(t, 300, billingRepo.lastPricingFailure.OutputTokens)
+	require.Contains(t, billingRepo.lastPricingFailure.PricingError, "pricing")
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T) {
@@ -1677,7 +1681,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesImageCoun
 		resolver:       newOpenAIImageChannelPricingResolverForTest(t, groupID, "gemini-image", 0.25),
 	}
 
-	cost := svc.calculateRecordUsageCost(
+	cost, err := svc.calculateRecordUsageCost(
 		context.Background(),
 		&ForwardResult{Model: "gemini-image", ImageCount: 2, ImageSize: "1K"},
 		&APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}},
@@ -1687,6 +1691,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesImageCoun
 		nil,
 	)
 
+	require.NoError(t, err)
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.5, cost.TotalCost, 1e-12)
@@ -1716,7 +1721,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesSizeTier(
 		resolver:       NewModelPricingResolver(channelService, NewBillingService(&config.Config{}, nil)),
 	}
 
-	cost := svc.calculateRecordUsageCost(
+	cost, err := svc.calculateRecordUsageCost(
 		context.Background(),
 		&ForwardResult{Model: "gemini-image", ImageCount: 2, ImageSize: "4K"},
 		&APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}},
@@ -1726,6 +1731,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesSizeTier(
 		nil,
 	)
 
+	require.NoError(t, err)
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.80, cost.TotalCost, 1e-12)
@@ -1755,7 +1761,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 		resolver:       NewModelPricingResolver(channelService, NewBillingService(&config.Config{}, nil)),
 	}
 
-	cost := svc.calculateRecordUsageCost(
+	cost, err := svc.calculateRecordUsageCost(
 		context.Background(),
 		&ForwardResult{Model: "gemini-image", ImageCount: 2, ImageSize: ""},
 		&APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}},
@@ -1765,6 +1771,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 		nil,
 	)
 
+	require.NoError(t, err)
 	require.NotNil(t, cost)
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 	require.InDelta(t, 0.44, cost.TotalCost, 1e-12)

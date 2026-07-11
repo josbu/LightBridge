@@ -692,7 +692,26 @@ export const authAPI = {
   completeLinuxDoOAuthRegistration,
   completeOIDCOAuthRegistration,
   completeWeChatOAuthRegistration,
-  createPendingDingTalkOAuthAccount
+  createPendingDingTalkOAuthAccount,
+  createPaymentEmbedToken
 }
 
 export default authAPI
+
+export interface PaymentEmbedTokenResponse {
+  access_token: string
+  token_type: 'Bearer'
+  scope: 'payment_embed'
+  audience: string
+  expires_in: number
+}
+
+/**
+ * Create a short-lived token for an external payment iframe.
+ * The returned token is restricted server-side to payment APIs and the exact
+ * browser origin supplied as audience.
+ */
+export async function createPaymentEmbedToken(audience: string): Promise<PaymentEmbedTokenResponse> {
+  const { data } = await apiClient.post<PaymentEmbedTokenResponse>('/auth/embed-token', { audience })
+  return data
+}

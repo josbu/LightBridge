@@ -105,9 +105,13 @@
             {{ t('customPage.openInNewTab') }}
           </a>
           <iframe
+            ref="embeddedFrame"
             :src="embeddedUrl"
             class="custom-embed-frame"
+            sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-downloads allow-top-navigation-by-user-activation"
+            referrerpolicy="no-referrer"
             allowfullscreen
+            @load="postEmbeddedAuthContext"
           ></iframe>
         </div>
       </div>
@@ -122,9 +126,17 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { createPaymentEmbedToken } from '@/api/auth'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import {
+  buildEmbeddedAuthMessage,
+  buildEmbeddedUrl,
+  detectTheme,
+  getEmbeddedTargetOrigin,
+  isEmbeddedReadyMessage,
+  isSecureEmbeddedOrigin,
+} from '@/utils/embedded-url'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -144,6 +156,11 @@ const loading = ref(false)
 const pageTheme = ref<'light' | 'dark'>('light')
 const renderedHtml = ref('')
 const markdownContainer = ref<HTMLElement | null>(null)
+const embeddedFrame = ref<HTMLIFrameElement | null>(null)
+const embeddedAuthToken = ref('')
+const embeddedAuthTokenOrigin = ref('')
+let embeddedAuthTokenExpiresAt = 0
+let embeddedTokenRequest: Promise<string | null> | null = null
 const tocItems = ref<TocItem[]>([])
 const tocVisible = ref(typeof window !== 'undefined' ? window.innerWidth > 768 : true)
 const activeHeadingId = ref('')
@@ -177,17 +194,80 @@ const embeddedUrl = computed(() => {
   return buildEmbeddedUrl(
     menuItem.value.url,
     authStore.user?.id,
-    authStore.token,
     pageTheme.value,
     locale.value,
   )
 })
+
+const embeddedOrigin = computed(() => getEmbeddedTargetOrigin(embeddedUrl.value))
 
 const isValidUrl = computed(() => {
   if (isMarkdownMode.value) return false
   const url = embeddedUrl.value
   return url.startsWith('http://') || url.startsWith('https://')
 })
+
+async function ensureEmbeddedAuthToken(): Promise<string | null> {
+  const targetOrigin = embeddedOrigin.value
+  if (!authStore.token || !targetOrigin || !isSecureEmbeddedOrigin(targetOrigin)) {
+    return null
+  }
+
+  if (
+    embeddedAuthToken.value &&
+    embeddedAuthTokenOrigin.value === targetOrigin &&
+    embeddedAuthTokenExpiresAt > Date.now() + 30_000
+  ) {
+    return embeddedAuthToken.value
+  }
+  if (embeddedTokenRequest) return embeddedTokenRequest
+
+  const requestedOrigin = targetOrigin
+  embeddedTokenRequest = createPaymentEmbedToken(requestedOrigin)
+    .then((result) => {
+      if (embeddedOrigin.value !== requestedOrigin || result.audience !== requestedOrigin) return null
+      embeddedAuthToken.value = result.access_token
+      embeddedAuthTokenOrigin.value = result.audience
+      embeddedAuthTokenExpiresAt = Date.now() + result.expires_in * 1000
+      return result.access_token
+    })
+    .catch(() => null)
+    .finally(() => {
+      embeddedTokenRequest = null
+    })
+  return embeddedTokenRequest
+}
+
+async function postEmbeddedAuthContext() {
+  const targetOrigin = embeddedOrigin.value
+  const frameWindow = embeddedFrame.value?.contentWindow
+  if (!frameWindow || !targetOrigin || !isSecureEmbeddedOrigin(targetOrigin)) return
+
+  const scopedToken = await ensureEmbeddedAuthToken()
+  if (!scopedToken) return
+
+  // The iframe may have navigated while the token request was in flight.
+  if (embeddedFrame.value?.contentWindow !== frameWindow || embeddedOrigin.value !== targetOrigin) return
+  const message = buildEmbeddedAuthMessage(
+    scopedToken,
+    authStore.user?.id,
+    pageTheme.value,
+    locale.value,
+    embeddedAuthTokenExpiresAt,
+  )
+  if (!message) return
+
+  frameWindow.postMessage(message, targetOrigin)
+}
+
+function onEmbeddedMessage(event: MessageEvent<unknown>) {
+  const frameWindow = embeddedFrame.value?.contentWindow
+  const targetOrigin = embeddedOrigin.value
+  if (!frameWindow || !targetOrigin) return
+  if (event.source !== frameWindow || event.origin !== targetOrigin) return
+  if (!isEmbeddedReadyMessage(event.data)) return
+  postEmbeddedAuthContext()
+}
 
 function generateHeadingId(text: string, index: number): string {
   const base = text
@@ -342,8 +422,29 @@ watch(markdownSlug, (slug) => {
   }
 }, { immediate: true })
 
+watch(
+  [embeddedOrigin, () => authStore.token, () => authStore.user?.id],
+  async () => {
+    embeddedAuthToken.value = ''
+    embeddedAuthTokenOrigin.value = ''
+    embeddedAuthTokenExpiresAt = 0
+    await nextTick()
+    await postEmbeddedAuthContext()
+  },
+)
+
+// Theme and locale changes do not require minting another scoped token. Reuse
+// the current token and only refresh the non-sensitive display context.
+watch([pageTheme, () => locale.value], () => {
+  void postEmbeddedAuthContext()
+})
+
 onMounted(async () => {
   pageTheme.value = detectTheme()
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('message', onEmbeddedMessage)
+  }
 
   if (typeof document !== 'undefined') {
     themeObserver = new MutationObserver(() => {
@@ -365,6 +466,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('message', onEmbeddedMessage)
+  }
   if (themeObserver) {
     themeObserver.disconnect()
     themeObserver = null

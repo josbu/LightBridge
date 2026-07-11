@@ -307,6 +307,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { makeProgressiveSidebarFlag, ProgressiveFeatures } from '@/utils/progressiveFeatures'
+import { moduleMenuContributions, resolveModuleText } from '@/modules/runtime/registry'
 
 interface NavItem {
   path: string
@@ -346,7 +347,7 @@ function applyFeatureFlags(items: NavItem[]): NavItem[] {
   return out
 }
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -826,11 +827,29 @@ const flagPromo = makeProgressiveSidebarFlag(ProgressiveFeatures.promo)
 const flagProxies = makeProgressiveSidebarFlag(ProgressiveFeatures.proxies)
 const flagChannelPricing = makeProgressiveSidebarFlag(ProgressiveFeatures.channelPricing)
 const flagSubscriptions = makeProgressiveSidebarFlag(ProgressiveFeatures.subscriptions)
-const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
+const flagOpsMonitoring = makeProgressiveSidebarFlag(ProgressiveFeatures.opsMonitoring)
+const flagModuleRuntime = makeProgressiveSidebarFlag(ProgressiveFeatures.moduleRuntime)
 
 // anyFlags：任一子开关「非 false」即显示（用于分组：只要有一个子项启用，分组就显示）
 function anyFlags(...flags: Array<() => boolean | undefined>): () => boolean {
   return () => flags.some((f) => f() !== false)
+}
+
+function moduleNavItems(group: string): NavItem[] {
+  const normalizedGroup = group.trim().toLowerCase()
+  const knownGroups = new Set(['operations', 'channels', 'commerce', 'marketing', 'security', 'system'])
+  return moduleMenuContributions.value
+    .filter((item) => {
+      const requested = (item.group || 'system').trim().toLowerCase()
+      const resolved = knownGroups.has(requested) ? requested : 'system'
+      return resolved === normalizedGroup
+    })
+    .map((item) => ({
+      path: item.path,
+      label: resolveModuleText(item.title, item.title_i18n, locale.value),
+      icon: ServerIcon,
+      featureFlag: flagModuleRuntime,
+    }))
 }
 
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
@@ -943,6 +962,7 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon },
         { path: '/admin/error-analysis', label: t('nav.errorAnalysis'), icon: ErrorAnalysisIcon },
+        ...moduleNavItems('operations'),
       ],
     },
 
@@ -972,6 +992,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/pricing', label: t('nav.channelPricing'), icon: PriceTagIcon, featureFlag: flagChannelPricing },
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
         { path: '/admin/model-catalog', label: t('nav.modelCatalog'), icon: DatabaseIcon },
+        ...moduleNavItems('channels'),
       ],
     },
 
@@ -987,6 +1008,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, featureFlag: flagPayment },
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, featureFlag: flagPayment },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, featureFlag: flagPayment },
+        ...moduleNavItems('commerce'),
       ],
     },
 
@@ -1005,6 +1027,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon, featureFlag: flagAffiliate },
         { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, featureFlag: flagRedeem },
         { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, featureFlag: flagPromo },
+        ...moduleNavItems('marketing'),
       ],
     },
 
@@ -1019,6 +1042,7 @@ const adminNavItems = computed((): NavItem[] => {
       children: [
         { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, featureFlag: flagRiskControl },
         { path: '/admin/privacy-filter', label: t('nav.privacyFilter'), icon: ShieldIcon, featureFlag: flagPrivacyFilter },
+        ...moduleNavItems('security'),
       ],
     },
 
@@ -1029,8 +1053,10 @@ const adminNavItems = computed((): NavItem[] => {
       icon: CogIcon,
       expandOnly: true,
       children: [
-        { path: '/admin/modules', label: t('nav.modules'), icon: ServerIcon },
+        { path: '/admin/modules', label: t('nav.modules'), icon: ServerIcon, featureFlag: flagModuleRuntime },
         { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, featureFlag: flagProxies },
+        { path: '/admin/proxy', label: 'Proxy Runtime', icon: ServerIcon, featureFlag: flagProxies },
+        ...moduleNavItems('system'),
         { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
         { path: '/admin/feedback', label: t('nav.feedback'), icon: FeedbackIcon },
       ],

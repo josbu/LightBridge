@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"log/slog"
 	"time"
 
 	dbent "github.com/WilliamWang1721/LightBridge/ent"
@@ -128,18 +127,16 @@ func ProvideAntigravityTokenProvider(
 	return p
 }
 
-// ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
+// ProvideDashboardAggregationService constructs the optional aggregation service.
+// FeatureRuntimeManager owns its lifecycle.
 func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, cfg *config.Config) *DashboardAggregationService {
-	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
-	svc.Start()
-	return svc
+	return NewDashboardAggregationService(repo, timingWheel, cfg)
 }
 
-// ProvideUsageCleanupService 创建并启动使用记录清理任务服务
+// ProvideUsageCleanupService constructs the optional cleanup service.
+// FeatureRuntimeManager owns its lifecycle.
 func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *TimingWheelService, dashboardAgg *DashboardAggregationService, cfg *config.Config) *UsageCleanupService {
-	svc := NewUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
-	svc.Start()
-	return svc
+	return NewUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
 }
 
 // ProvideAccountExpiryService creates and starts AccountExpiryService.
@@ -230,7 +227,7 @@ func ProvideRateLimitService(
 	return svc
 }
 
-// ProvideOpsMetricsCollector creates and starts OpsMetricsCollector.
+// ProvideOpsMetricsCollector constructs OpsMetricsCollector. FeatureRuntimeManager owns its lifecycle.
 func ProvideOpsMetricsCollector(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
@@ -240,12 +237,10 @@ func ProvideOpsMetricsCollector(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsMetricsCollector {
-	collector := NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
-	collector.Start()
-	return collector
+	return NewOpsMetricsCollector(opsRepo, settingRepo, accountRepo, concurrencyService, db, redisClient, cfg)
 }
 
-// ProvideOpsAggregationService creates and starts OpsAggregationService (hourly/daily pre-aggregation).
+// ProvideOpsAggregationService constructs the optional pre-aggregation service.
 func ProvideOpsAggregationService(
 	opsRepo OpsRepository,
 	settingRepo SettingRepository,
@@ -253,12 +248,10 @@ func ProvideOpsAggregationService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsAggregationService {
-	svc := NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
-	svc.Start()
-	return svc
+	return NewOpsAggregationService(opsRepo, settingRepo, db, redisClient, cfg)
 }
 
-// ProvideOpsAlertEvaluatorService creates and starts OpsAlertEvaluatorService.
+// ProvideOpsAlertEvaluatorService constructs the optional alert evaluator.
 func ProvideOpsAlertEvaluatorService(
 	opsService *OpsService,
 	opsRepo OpsRepository,
@@ -266,9 +259,7 @@ func ProvideOpsAlertEvaluatorService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsAlertEvaluatorService {
-	svc := NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg)
-	svc.Start()
-	return svc
+	return NewOpsAlertEvaluatorService(opsService, opsRepo, emailService, redisClient, cfg)
 }
 
 // ProvideOpsCleanupService creates and starts OpsCleanupService (cron scheduled).
@@ -286,7 +277,6 @@ func ProvideOpsCleanupService(
 	opsService *OpsService,
 ) *OpsCleanupService {
 	svc := NewOpsCleanupService(opsRepo, db, redisClient, cfg, channelMonitorSvc, settingRepo)
-	svc.Start()
 	if opsService != nil {
 		opsService.SetCleanupReloader(svc)
 	}
@@ -294,10 +284,7 @@ func ProvideOpsCleanupService(
 }
 
 func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
-	sink := NewOpsSystemLogSink(opsRepo)
-	sink.Start()
-	logger.SetSink(sink)
-	return sink
+	return NewOpsSystemLogSink(opsRepo)
 }
 
 func buildIdempotencyConfig(cfg *config.Config) IdempotencyConfig {
@@ -347,7 +334,7 @@ func ProvideScheduledTestService(
 	return NewScheduledTestService(planRepo, resultRepo)
 }
 
-// ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
+// ProvideScheduledTestRunnerService constructs the optional runner.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
@@ -355,12 +342,10 @@ func ProvideScheduledTestRunnerService(
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
-	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
-	svc.Start()
-	return svc
+	return NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
 }
 
-// ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
+// ProvideOpsScheduledReportService constructs the optional report scheduler.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,
 	userService *UserService,
@@ -368,9 +353,7 @@ func ProvideOpsScheduledReportService(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsScheduledReportService {
-	svc := NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
-	svc.Start()
-	return svc
+	return NewOpsScheduledReportService(opsService, userService, emailService, redisClient, cfg)
 }
 
 // ProvideAPIKeyAuthCacheInvalidator 提供 API Key 认证缓存失效能力
@@ -380,7 +363,7 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
-// ProvideBackupService creates and starts BackupService
+// ProvideBackupService constructs BackupService. FeatureRuntimeManager owns its lifecycle.
 func ProvideBackupService(
 	settingRepo SettingRepository,
 	cfg *config.Config,
@@ -388,9 +371,7 @@ func ProvideBackupService(
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
 ) *BackupService {
-	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
-	svc.Start()
-	return svc
+	return NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
 }
 
 // ProvideOpsService constructs OpsService and wires the SettingService-backed quota
@@ -567,7 +548,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupCapacityService,
 	NewChannelService,
 	NewModelPricingResolver,
-	NewContentModerationService,
+	ProvideContentModerationService,
 	NewPrivacyFilterService,
 	NewAffiliateService,
 	NewUIThemeService,
@@ -581,6 +562,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUserPlatformQuotaUsageFlusher,
 	ProvideLightBridgeConnectService,
 	ProvideLightBridgeConnectSyncService,
+	ProvideFeatureRuntimeManager,
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
@@ -610,17 +592,9 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 	return svc
 }
 
-// ProvidePaymentOrderExpiryService creates PaymentOrderExpiryService and runs it
-// only while the payment feature is enabled.
+// ProvidePaymentOrderExpiryService constructs the optional expiry worker.
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, settingService *SettingService) *PaymentOrderExpiryService {
-	svc := NewPaymentOrderExpiryService(paymentSvc, settingService, 60*time.Second)
-	if settingService != nil {
-		settingService.AddOnUpdateCallback(func() {
-			svc.SyncFeatureState(context.Background())
-		})
-	}
-	svc.SyncFeatureState(context.Background())
-	return svc
+	return NewPaymentOrderExpiryService(paymentSvc, settingService, 60*time.Second)
 }
 
 // ProvideChannelMonitorService 创建渠道监控服务（CRUD + RunCheck + 用户视图聚合）。
@@ -632,21 +606,10 @@ func ProvideChannelMonitorService(
 	return NewChannelMonitorService(repo, encryptor)
 }
 
-// ProvideChannelMonitorRunner 创建渠道监控调度器。
-// 通过 SetScheduler 注入回 service；功能关闭时 runner 保持无任务、无 ticker，
-// 功能打开时通过 settings callback 加载 enabled monitors。Runner.Stop 由 cleanup 调用。
+// ProvideChannelMonitorRunner constructs the optional monitor scheduler.
 func ProvideChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService) *ChannelMonitorRunner {
 	r := NewChannelMonitorRunner(svc, settingService)
 	svc.SetScheduler(r)
-	if settingService != nil {
-		settingService.AddOnUpdateCallback(func() {
-			r.SyncFeatureState(context.Background())
-		})
-	}
-	r.SyncFeatureState(context.Background())
-	if !r.active {
-		slog.Info("channel_monitor: feature disabled, runner paused")
-	}
 	return r
 }
 
@@ -661,13 +624,34 @@ func ProvideLightBridgeConnectService(cfg *config.Config) *LightBridgeConnectSer
 	return NewLightBridgeConnectService(encryptionKey)
 }
 
-// ProvideLightBridgeConnectSyncService creates and starts the sync service
+// ProvideLightBridgeConnectSyncService constructs the optional sync service.
 func ProvideLightBridgeConnectSyncService(
 	lbcService *LightBridgeConnectService,
 	db *sql.DB,
 ) *LightBridgeConnectSyncService {
 	// 默认 5 分钟同步一次
-	svc := NewLightBridgeConnectSyncService(lbcService, db, 5*time.Minute)
-	svc.Start()
-	return svc
+	return NewLightBridgeConnectSyncService(lbcService, db, 5*time.Minute)
+}
+
+// ProvideContentModerationService constructs the moderation service without
+// self-registering a settings callback. FeatureRuntimeManager owns the worker
+// lifecycle and reconciles it from the shared feature snapshot.
+func ProvideContentModerationService(
+	settingRepo SettingRepository,
+	repo ContentModerationRepository,
+	hashCache ContentModerationHashCache,
+	groupRepo GroupRepository,
+	userRepo UserRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	emailService *EmailService,
+) *ContentModerationService {
+	return NewContentModerationService(
+		settingRepo,
+		repo,
+		hashCache,
+		groupRepo,
+		userRepo,
+		authCacheInvalidator,
+		emailService,
+	)
 }

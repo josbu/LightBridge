@@ -12,6 +12,8 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { isProgressiveFeatureEnabled, isProgressivePathDisabled } from '@/utils/progressiveFeatures'
 import { progressiveRouteGroups } from './progressiveRoutes'
+import { syncModuleRuntime } from '@/modules/runtime/registry'
+import { ProgressiveFeatures } from '@/utils/progressiveFeatures'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveDocumentTitle } from './title'
 
@@ -283,30 +285,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/ops',
-    name: 'AdminOps',
-    component: () => import('@/views/admin/ops/OpsDashboard.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Ops Monitoring',
-      titleKey: 'admin.ops.title',
-      descriptionKey: 'admin.ops.description'
-    }
-  },
-  {
-    path: '/admin/error-analysis',
-    name: 'AdminErrorAnalysis',
-    component: () => import('@/views/admin/ops/ErrorAnalysisView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Error Analysis',
-      titleKey: 'admin.ops.errorAnalysis.title',
-      descriptionKey: 'admin.ops.errorAnalysis.description'
-    }
-  },
-  {
     path: '/admin/users',
     name: 'AdminUsers',
     component: () => import('@/views/admin/UsersView.vue'),
@@ -404,18 +382,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/modules',
-    name: 'AdminModules',
-    component: () => import('@/views/admin/ModulesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Modules',
-      titleKey: 'modules.title',
-      descriptionKey: 'modules.description'
-    }
-  },
-  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),
@@ -475,7 +441,7 @@ const router = createRouter({
  */
 const removeProgressiveRoute = new Map<string, () => void>()
 
-export function syncProgressiveRoutes(): void {
+export async function syncProgressiveRoutes(): Promise<void> {
   for (const group of progressiveRouteGroups) {
     const enabled = isProgressiveFeatureEnabled(group.feature)
     for (const route of group.routes) {
@@ -498,6 +464,7 @@ export function syncProgressiveRoutes(): void {
       }
     }
   }
+  await syncModuleRuntime(router, isProgressiveFeatureEnabled(ProgressiveFeatures.moduleRuntime))
 }
 
 let authInitialized = false

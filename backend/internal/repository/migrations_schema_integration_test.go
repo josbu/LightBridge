@@ -86,6 +86,16 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_billing_dedup_archive", "request_fingerprint", "character varying", 64, false)
 	requireIndex(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_pkey")
 
+	// usage_pricing_failures: durable recovery ledger for unpriced completed requests
+	var usagePricingFailuresRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.usage_pricing_failures')").Scan(&usagePricingFailuresRegclass))
+	require.True(t, usagePricingFailuresRegclass.Valid, "expected usage_pricing_failures table to exist")
+	requireColumn(t, tx, "usage_pricing_failures", "payload", "jsonb", 0, false)
+	requireColumn(t, tx, "usage_pricing_failures", "pricing_error", "text", 0, false)
+	requireColumn(t, tx, "usage_pricing_failures", "status", "character varying", 16, false)
+	requireIndex(t, tx, "usage_pricing_failures", "idx_usage_pricing_failures_pending")
+	requireIndex(t, tx, "usage_pricing_failures", "idx_usage_pricing_failures_created_at")
+
 	// settings table should exist
 	var settingsRegclass sql.NullString
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.settings')").Scan(&settingsRegclass))

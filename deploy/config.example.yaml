@@ -67,6 +67,38 @@ server:
 run_mode: "standard"
 
 # =============================================================================
+# Progressive Feature Registration
+# 渐进式功能注册
+# =============================================================================
+# The profile controls which optional subsystems are eligible to register at
+# process startup. Core authentication, gateway, billing and OAuth token refresh
+# always remain enabled.
+# profile 用于控制哪些可选子系统允许在进程启动时注册。核心认证、网关、
+# 计费和 OAuth Token 刷新始终保持启用。
+#
+# - minimal: core request path plus lightweight dynamic business features
+# - minimal: 仅核心请求链路和轻量动态业务功能
+# - standard: minimal + ops/statistics, cleanup, backup and scheduled tests
+# - standard: minimal + 运维统计、清理、备份和计划测试
+# - full: standard + module runtime and LightBridge Connect
+# - full: standard + 模块运行时和 LightBridge Connect
+#
+# Boot-scoped feature changes require a process restart. Dynamic business
+# features can be enabled or disabled without restarting.
+# boot 类型功能修改后需要重启进程；dynamic 业务功能可以运行时启停。
+features:
+  profile: "full"
+  # Optional process-level overrides keyed by stable feature ID. Core features
+  # cannot be disabled. Prefer business settings for dynamic feature switches.
+  # 可选的进程级覆盖项，key 为稳定 feature ID。核心功能不可关闭；动态业务
+  # 功能优先使用后台业务设置开关。
+  overrides: {}
+  # Example / 示例：
+  # overrides:
+  #   ops_monitoring: false
+  #   module_runtime: false
+
+# =============================================================================
 # Language Configuration
 # 语言配置
 # =============================================================================

@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"net/http"
+
+	"github.com/WilliamWang1721/LightBridge/internal/pkg/response"
 	"github.com/WilliamWang1721/LightBridge/internal/service"
 	"github.com/gin-gonic/gin"
-	"net/http"
 )
 
 type ModuleHandler struct{ service *service.ModuleService }
@@ -24,4 +26,14 @@ func (h *ModuleHandler) ProviderAccountForms(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"forms": items})
+}
+
+// Asset serves a file only from the enabled version of a module package.
+func (h *ModuleHandler) Asset(c *gin.Context) {
+	asset, err := h.service.ResolveEnabledAsset(c.Request.Context(), c.Param("module"), c.Param("version"), c.Param("path"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.File(asset)
 }
