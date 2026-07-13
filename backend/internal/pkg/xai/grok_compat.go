@@ -652,7 +652,7 @@ func NormalizeResponsesSSEStream(src io.Reader) io.ReadCloser {
 func NormalizeResponsesSSEStreamWithObserver(src io.Reader, observer func([]byte)) io.ReadCloser {
 	reader, writer := io.Pipe()
 	go func() {
-		defer writer.Close()
+		defer func() { _ = writer.Close() }()
 		scanner := bufio.NewScanner(src)
 		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 		var eventName string

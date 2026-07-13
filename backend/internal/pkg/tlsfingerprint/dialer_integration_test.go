@@ -13,10 +13,21 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func skipUnlessExternalFingerprintTestsEnabled(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	if os.Getenv("TLSFINGERPRINT_NETWORK_TESTS") != "1" {
+		t.Skip("skipping external fingerprint test; set TLSFINGERPRINT_NETWORK_TESTS=1 to run manually")
+	}
+}
 
 // skipIfExternalServiceUnavailable checks if the external service is available.
 // If not, it skips the test instead of failing.
@@ -44,9 +55,7 @@ func skipIfExternalServiceUnavailable(t *testing.T, err error) {
 // Expected JA3 hash: 44f88fca027f27bab4bb08d4af15f23e (Node.js 24.x)
 // Expected JA4: t13d1714h1_5b57614c22b0_7baf387fc6ff
 func TestJA3Fingerprint(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	skipUnlessExternalFingerprintTestsEnabled(t)
 
 	profile := &Profile{
 		Name:         "Default Profile Test",
@@ -107,9 +116,7 @@ func TestJA3Fingerprint(t *testing.T) {
 // TestAllProfiles tests multiple TLS fingerprint profiles against tls.peet.ws.
 // Run with: go test -v -tags=integration -run TestAllProfiles ./internal/pkg/tlsfingerprint/...
 func TestAllProfiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	skipUnlessExternalFingerprintTestsEnabled(t)
 
 	// Define all profiles to test with their expected fingerprints
 	// These profiles are from config.yaml gateway.tls_fingerprint.profiles

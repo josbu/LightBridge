@@ -28,6 +28,7 @@ concurrency:
 env:
   GO_VERSION_EXPECTED: '1.26.5'
   NODE_VERSION: '22.13.1'
+  COREPACK_VERSION: '0.31.0'
   PNPM_VERSION: '9.15.9'
 
 jobs:
@@ -200,6 +201,8 @@ jobs:
       - name: Enable pinned pnpm with Corepack
         run: |
           set -euo pipefail
+          npm install --global "corepack@${COREPACK_VERSION}"
+          test "$(corepack --version)" = "$COREPACK_VERSION"
           corepack enable
           corepack prepare "pnpm@${PNPM_VERSION}" --activate
           test "$(pnpm --version)" = "$PNPM_VERSION"

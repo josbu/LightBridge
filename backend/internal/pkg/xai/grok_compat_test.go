@@ -90,7 +90,7 @@ func TestNormalizeResponsesSSEStreamPatchesCompletedOutput(t *testing.T) {
 	}, "\n")
 
 	reader := NormalizeResponsesSSEStream(strings.NewReader(stream))
-	defer reader.Close()
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
 	data, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	text := string(data)
@@ -119,7 +119,7 @@ func TestNormalizeResponsesSSEStreamObserverSeesPatchedCompletedOutput(t *testin
 			observedCompleted = append([]byte(nil), event...)
 		}
 	})
-	defer reader.Close()
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
 	_, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.NotEmpty(t, observedCompleted)
