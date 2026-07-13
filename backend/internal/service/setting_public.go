@@ -159,7 +159,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		EmailVerifyEnabled:               emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:     settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
 		RegistrationEmailSuffixWhitelist: registrationEmailSuffixWhitelist,
-		PromoCodeEnabled:                 settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
+		PromoCodeEnabled:                 s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePromo),
 		PasswordResetEnabled:             passwordResetEnabled,
 		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
 		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
@@ -191,7 +191,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		WeChatOAuthMPEnabled:             weChatMPEnabled,
 		WeChatOAuthMobileEnabled:         weChatMobileEnabled,
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
-		PaymentEnabled:                   settings[SettingPaymentEnabled] == "true",
+		PaymentEnabled:                   s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePayment),
 		OIDCOAuthEnabled:                 oidcEnabled,
 		OIDCOAuthProviderName:            oidcProviderName,
 		GitHubOAuthEnabled:               gitHubEnabled,
@@ -201,21 +201,21 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		BalanceLowNotifyThreshold:        balanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:      settings[SettingKeyBalanceLowNotifyRechargeURL],
 
-		ChannelMonitorEnabled:                !isFalseSettingValue(settings[SettingKeyChannelMonitorEnabled]),
+		ChannelMonitorEnabled:                s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelMonitor),
 		ChannelMonitorDefaultIntervalSeconds: parseChannelMonitorInterval(settings[SettingKeyChannelMonitorDefaultIntervalSeconds]),
 
-		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
+		AvailableChannelsEnabled: s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureAvailableChannels),
 
-		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
+		AffiliateEnabled: s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureAffiliate),
 
-		RiskControlEnabled:   settings[SettingKeyRiskControlEnabled] == "true",
-		PrivacyFilterEnabled: settings[SettingKeyPrivacyFilterEnabled] == "true",
+		RiskControlEnabled:   s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureRiskControl),
+		PrivacyFilterEnabled: s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePrivacyFilter),
 
-		AnnouncementsEnabled:  settings[SettingKeyAnnouncementsEnabled] != "false",
-		RedeemEnabled:         settings[SettingKeyRedeemEnabled] != "false",
-		PromoEnabled:          settings[SettingKeyPromoCodeEnabled] != "false",
-		ProxiesEnabled:        settings[SettingKeyProxiesEnabled] != "false",
-		ChannelPricingEnabled: settings[SettingKeyChannelPricingEnabled] != "false",
+		AnnouncementsEnabled:  s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureAnnouncements),
+		RedeemEnabled:         s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureRedeem),
+		PromoEnabled:          s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePromo),
+		ProxiesEnabled:        s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureProxies),
+		ChannelPricingEnabled: s.IsProgressiveFeatureEnabled(ctx, ProgressiveFeatureChannelPricing),
 
 		DeploymentMode: NormalizeDeploymentMode(settings[SettingKeyDeploymentMode]),
 	}, nil

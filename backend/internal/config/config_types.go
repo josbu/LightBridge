@@ -6,8 +6,14 @@ const (
 )
 
 const (
-	LegacyModuleMarketplaceRegistryURL  = "https://github.com/WilliamWang1721/LightBridge/releases/download/module-migration-20260606/registry.json"
-	DefaultModuleMarketplaceRegistryURL = "https://github.com/WilliamWang1721/LightBridge/releases/download/module-anthropic-oauth-provider-v0.1.0/registry.json"
+	LegacyManagedProviderRegistryURL  = "https://github.com/WilliamWang1721/LightBridge/releases/download/module-migration-20260606/registry.json"
+	DefaultManagedProviderRegistryURL = "https://github.com/WilliamWang1721/LightBridge/releases/download/module-anthropic-oauth-provider-v0.1.0/registry.json"
+
+	// Deprecated compatibility aliases. The configuration keys retain their
+	// historical marketplace_* names, but this registry is internal-only and is
+	// used solely to provision LightBridge-managed provider runtimes.
+	LegacyModuleMarketplaceRegistryURL  = LegacyManagedProviderRegistryURL
+	DefaultModuleMarketplaceRegistryURL = DefaultManagedProviderRegistryURL
 )
 
 // 使用量记录队列溢出策略（drop/sample 仅用于读取旧配置；运行时统一安全降级为 sync）

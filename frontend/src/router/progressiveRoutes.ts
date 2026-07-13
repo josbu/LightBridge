@@ -424,23 +424,6 @@ export const progressiveRouteGroups = [
     ],
   }),
   defineProgressiveRouteGroup({
-    feature: ProgressiveFeatures.moduleRuntime,
-    routes: [
-      {
-        path: '/admin/modules',
-        name: 'AdminModules',
-        component: () => import('@/views/admin/ModulesView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiresAdmin: true,
-          title: 'Modules',
-          titleKey: 'modules.title',
-          descriptionKey: 'modules.description',
-        },
-      },
-    ],
-  }),
-  defineProgressiveRouteGroup({
     feature: ProgressiveFeatures.proxies,
     routes: [
       {

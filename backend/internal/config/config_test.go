@@ -30,28 +30,28 @@ func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultModuleMarketplaceRegistryURL(t *testing.T) {
+func TestLoadDefaultManagedProviderRegistryURL(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if cfg.Modules.MarketplaceRegistryURL != DefaultModuleMarketplaceRegistryURL {
-		t.Fatalf("marketplace registry = %q, want %q", cfg.Modules.MarketplaceRegistryURL, DefaultModuleMarketplaceRegistryURL)
+	if cfg.Modules.MarketplaceRegistryURL != DefaultManagedProviderRegistryURL {
+		t.Fatalf("managed provider registry = %q, want %q", cfg.Modules.MarketplaceRegistryURL, DefaultManagedProviderRegistryURL)
 	}
 }
 
-func TestLoadUpgradesLegacyModuleMarketplaceRegistryURL(t *testing.T) {
+func TestLoadUpgradesLegacyManagedProviderRegistryURL(t *testing.T) {
 	resetViperWithJWTSecret(t)
-	viper.Set("modules.marketplace_registry_url", LegacyModuleMarketplaceRegistryURL)
+	viper.Set("modules.marketplace_registry_url", LegacyManagedProviderRegistryURL)
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if cfg.Modules.MarketplaceRegistryURL != DefaultModuleMarketplaceRegistryURL {
-		t.Fatalf("marketplace registry = %q, want %q", cfg.Modules.MarketplaceRegistryURL, DefaultModuleMarketplaceRegistryURL)
+	if cfg.Modules.MarketplaceRegistryURL != DefaultManagedProviderRegistryURL {
+		t.Fatalf("managed provider registry = %q, want %q", cfg.Modules.MarketplaceRegistryURL, DefaultManagedProviderRegistryURL)
 	}
 }
 

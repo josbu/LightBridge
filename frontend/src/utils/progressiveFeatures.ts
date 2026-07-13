@@ -111,7 +111,7 @@ export const ProgressiveFeatures = {
   }),
   moduleRuntime: defineProgressiveFeature({
     id: 'moduleRuntime', backendId: 'module_runtime', label: 'Module Runtime',
-    routeNames: ['AdminModules'], pathPrefixes: ['/admin/modules'],
+    routeNames: [],
   }),
   lightbridgeConnect: defineProgressiveFeature({
     id: 'lightbridgeConnect', backendId: 'lightbridge_connect', label: 'LightBridge Connect', routeNames: [],

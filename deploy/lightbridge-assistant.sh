@@ -239,7 +239,7 @@ declare -A MSG=(
   ["feat_privacy"]="隐私与安全"
   ["feat_privacy_desc"]="内置隐私过滤器、内容审核、TLS 指纹模拟"
   ["feat_console"]="管理控制台"
-  ["feat_console_desc"]="拖拽式仪表盘、模块市场、实时监控"
+  ["feat_console_desc"]="拖拽式仪表盘、渐进式功能控制、实时监控"
 
   # Main menu
   ["menu_title"]="主菜单"
@@ -855,7 +855,7 @@ declare -A MSG_EN=(
   ["feat_privacy"]="Privacy & Security"
   ["feat_privacy_desc"]="Privacy filter, content moderation, TLS fingerprint simulation"
   ["feat_console"]="Admin Console"
-  ["feat_console_desc"]="Drag-and-drop dashboard, module marketplace, real-time monitoring"
+  ["feat_console_desc"]="Drag-and-drop dashboard, progressive feature controls, real-time monitoring"
   ["about_desc1"]="LightBridge is a self-hosted, multi-provider AI API gateway."
   ["about_desc2"]="It sits between your apps and upstream AI providers."
   ["about_desc3"]="Register provider accounts once, get a unified endpoint."

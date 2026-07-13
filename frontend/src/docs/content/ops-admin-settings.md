@@ -89,34 +89,14 @@
 
 ---
 
-## 模块管理 `/admin/modules`
+## 功能注册中心 `/admin/features`
 
-管理系统内置功能和可安装模块。
+统一管理渐进式注册功能。页面按核心、可选和扩展层级展示所有功能，并显示当前配置、运行状态、资源配置要求、依赖、注册面和运行时组件。
 
-### 内置功能
-
-以卡片网格展示 5 个内置功能开关，每个卡片含图标、标题、描述和 Toggle 开关：
-
-| 功能 | 配置链接 |
-|------|---------|
-| Channel Monitor（渠道监控） | `/admin/channels/monitor` |
-| Available Channels（可用渠道） | `/admin/channels/pricing` |
-| Risk Control（风控） | `/admin/risk-control` |
-| Privacy Filter（隐私过滤） | `/admin/privacy-filter` |
-| Affiliate（分销） | `/admin/affiliates/invites` |
-
-### 已安装模块
-
-| 操作 | 说明 |
-|------|------|
-| Approve Permissions | 审批模块权限 |
-| Enable / Disable | 启用或禁用模块 |
-| Uninstall | 卸载模块 |
-| Purge | 清除模块数据（危险操作） |
-
-### 市场
-
-展示可安装的市场模块，点击 Install 按钮安装。
+- 具有控制权限的功能可直接开关，产生显式配置覆盖。
+- 已产生覆盖的功能可恢复默认值。
+- 启动期注册的功能会显示“需要重启后生效”，避免配置修改后误以为运行时已立即切换。
+- 模块运行时仍作为一个扩展功能在此处管理；远程 Provider UI 贡献会继续由其运行时清单加载。
 
 ---
 

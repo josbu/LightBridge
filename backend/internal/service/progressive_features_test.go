@@ -185,3 +185,98 @@ func TestProgressiveFeatureSnapshotBatchesAndInvalidatesSettings(t *testing.T) {
 	require.False(t, svc.IsProgressiveFeatureEnabled(ctx, ProgressiveFeaturePayment))
 	require.Equal(t, int32(2), repo.multipleCalls.Load())
 }
+
+func TestProgressiveFeatureDatabaseOverridePrecedenceAndConstraints(t *testing.T) {
+	cfg := &config.Config{Features: config.FeaturesConfig{
+		Profile: config.FeatureProfileMinimal,
+		Overrides: map[string]bool{
+			string(ProgressiveFeaturePayment): false,
+		},
+	}}
+	repo := &progressiveSettingRepoStub{values: map[string]string{
+		SettingPaymentEnabled: "false",
+		progressiveFeatureOverrideKey(ProgressiveFeaturePayment):       "true",
+		SettingKeyDeploymentMode:                                       DeploymentModePersonal,
+		progressiveFeatureOverrideKey(ProgressiveFeatureRedeem):        "true",
+		progressiveFeatureOverrideKey(ProgressiveFeatureOpsMonitoring): "true",
+	}}
+	svc := NewSettingService(repo, cfg)
+
+	// A database decision supersedes profile, process override and legacy flags.
+	require.True(t, svc.IsProgressiveFeatureEnabled(context.Background(), ProgressiveFeaturePayment))
+	// Deployment and process prerequisites remain authoritative.
+	require.False(t, svc.IsProgressiveFeatureEnabled(context.Background(), ProgressiveFeatureRedeem))
+	require.False(t, svc.IsProgressiveFeatureEnabled(context.Background(), ProgressiveFeatureOpsMonitoring))
+}
+
+func TestProgressiveFeatureDatabaseOverrideStillHonorsDependencies(t *testing.T) {
+	parent := ProgressiveFeature("test_parent")
+	child := ProgressiveFeature("test_child")
+	definitions := map[ProgressiveFeature]ProgressiveFeatureDefinition{
+		parent: optionalFeature(parent, "parent", "parent_enabled", false, false),
+		child: {
+			ID: child, Label: "child", Tier: ProgressiveFeatureTierOptional,
+			Activation:     ProgressiveFeatureActivationDynamic,
+			MinimumProfile: config.FeatureProfileMinimal,
+			Dependencies:   []ProgressiveFeature{parent},
+		},
+	}
+	snapshot := buildProgressiveFeatureSnapshot(&config.Config{}, map[string]string{
+		progressiveFeatureOverrideKey(parent): "false",
+		progressiveFeatureOverrideKey(child):  "true",
+	}, definitions)
+	require.False(t, snapshot.states[child].Enabled)
+	require.Equal(t, "dependency_disabled", snapshot.states[child].Reason)
+}
+
+func TestProgressiveFeatureRepositoryOverrideKeepsRequestPathServicesInSync(t *testing.T) {
+	repo := &progressiveSettingRepoStub{values: map[string]string{
+		SettingPaymentEnabled: "false",
+		progressiveFeatureOverrideKey(ProgressiveFeaturePayment): "true",
+	}}
+
+	enabled, overridden := progressiveFeatureRepositoryOverride(
+		context.Background(),
+		repo,
+		ProgressiveFeaturePayment,
+	)
+	require.True(t, overridden)
+	require.True(t, enabled)
+
+	_, overridden = progressiveFeatureRepositoryOverride(
+		context.Background(),
+		repo,
+		ProgressiveFeaturePrivacyFilter,
+	)
+	require.False(t, overridden)
+}
+
+func TestSetProgressiveFeatureOverridePersistsResetsAndNotifies(t *testing.T) {
+	repo := &progressiveSettingRepoStub{values: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+	var callbackCalls atomic.Int32
+	svc.AddOnUpdateCallback(func() { callbackCalls.Add(1) })
+
+	enabled := true
+	require.NoError(t, svc.SetProgressiveFeatureOverride(context.Background(), ProgressiveFeaturePayment, &enabled))
+	require.True(t, svc.IsProgressiveFeatureEnabled(context.Background(), ProgressiveFeaturePayment))
+	require.Equal(t, int32(1), callbackCalls.Load())
+
+	overview := svc.ProgressiveFeatureControlOverview(context.Background(), nil)
+	var payment ProgressiveFeatureControlState
+	for _, feature := range overview.Features {
+		if feature.ID == ProgressiveFeaturePayment {
+			payment = feature
+			break
+		}
+	}
+	require.NotNil(t, payment.Override)
+	require.True(t, *payment.Override)
+	require.True(t, payment.Controllable)
+
+	require.NoError(t, svc.SetProgressiveFeatureOverride(context.Background(), ProgressiveFeaturePayment, nil))
+	require.False(t, svc.IsProgressiveFeatureEnabled(context.Background(), ProgressiveFeaturePayment))
+	require.Equal(t, int32(2), callbackCalls.Load())
+	require.Error(t, svc.SetProgressiveFeatureOverride(context.Background(), ProgressiveFeatureCoreGateway, &enabled))
+	require.Error(t, svc.SetProgressiveFeatureOverride(context.Background(), ProgressiveFeature("missing"), &enabled))
+}

@@ -119,6 +119,9 @@ func (s *OpsService) IsMonitoringEnabled(ctx context.Context) bool {
 	if s.settingRepo == nil {
 		return true
 	}
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, s.settingRepo, ProgressiveFeatureOpsMonitoring); overridden {
+		return enabled
+	}
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyOpsMonitoringEnabled)
 	if err != nil {
 		// Default enabled when key is missing, and fail-open on transient errors

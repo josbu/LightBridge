@@ -46,11 +46,16 @@ vi.mock('@/api/setup', () => ({
   getSetupStatus: vi.fn(),
 }))
 
+vi.mock('@/modules/runtime/registry', () => ({
+  syncModuleRuntime: vi.fn().mockResolvedValue(undefined),
+  resetModuleRuntime: vi.fn(),
+}))
+
 async function loadRouterWithSettings(settings: Record<string, unknown>) {
   appStore.cachedPublicSettings = settings
   vi.resetModules()
   const routerModule = await import('@/router')
-  routerModule.syncProgressiveRoutes()
+  await routerModule.syncProgressiveRoutes()
   return routerModule.default
 }
 
@@ -108,5 +113,15 @@ describe('progressive route registry', () => {
     expect(router.hasRoute('Redeem')).toBe(false)
     expect(router.hasRoute('AdminAnnouncements')).toBe(false)
     expect(router.hasRoute('AdminChannelMonitor')).toBe(true)
+  })
+
+  it('keeps the feature registry route available when module runtime is not registered', async () => {
+    const router = await loadRouterWithSettings({
+      deployment_mode: 'distribution',
+    })
+
+    expect(router.hasRoute('AdminFeatureRegistry')).toBe(true)
+    expect(router.resolve('/admin/features').name).toBe('AdminFeatureRegistry')
+    expect(router.hasRoute('AdminModules')).toBe(false)
   })
 })

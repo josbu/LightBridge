@@ -376,6 +376,9 @@ func (s *PrivacyFilterService) isFeatureEnabled(ctx context.Context) bool {
 	if s == nil || s.settingRepo == nil {
 		return false
 	}
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, s.settingRepo, ProgressiveFeaturePrivacyFilter); overridden {
+		return enabled
+	}
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyPrivacyFilterEnabled)
 	if err != nil {
 		return false

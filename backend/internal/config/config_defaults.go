@@ -95,7 +95,7 @@ func setDefaults() {
 	viper.SetDefault("modules.data_dir", "data")
 	viper.SetDefault("modules.signature_public_key_path", "")
 	viper.SetDefault("modules.marketplace_registry_path", "")
-	viper.SetDefault("modules.marketplace_registry_url", DefaultModuleMarketplaceRegistryURL)
+	viper.SetDefault("modules.marketplace_registry_url", DefaultManagedProviderRegistryURL)
 	viper.SetDefault("modules.marketplace_timeout_seconds", 20)
 	viper.SetDefault("modules.proxy.mihomo_binary_path", "")
 	viper.SetDefault("modules.proxy.runtime_dir", "")

@@ -38,7 +38,6 @@ type AdminHandlers struct {
 	PrivacyFilter          *admin.PrivacyFilterHandler
 	Payment                *admin.PaymentHandler
 	Affiliate              *admin.AffiliateHandler
-	Module                 *admin.ModuleHandler
 	UITheme                *admin.UIThemeHandler
 	LightBridgeConnect     *admin.LightBridgeConnectHandler
 	AistudioProxy          *admin.AistudioProxyHandler

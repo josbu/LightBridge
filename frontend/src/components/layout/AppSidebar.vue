@@ -1053,7 +1053,7 @@ const adminNavItems = computed((): NavItem[] => {
       icon: CogIcon,
       expandOnly: true,
       children: [
-        { path: '/admin/modules', label: t('nav.modules'), icon: ServerIcon, featureFlag: flagModuleRuntime },
+        { path: '/admin/features', label: t('nav.featureRegistry'), icon: ServerIcon },
         { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, featureFlag: flagProxies },
         { path: '/admin/proxy', label: 'Proxy Runtime', icon: ServerIcon, featureFlag: flagProxies },
         ...moduleNavItems('system'),

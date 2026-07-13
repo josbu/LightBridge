@@ -201,7 +201,7 @@ func normalizeModuleConfig(cfg *ModuleConfig) {
 	if cfg == nil {
 		return
 	}
-	if strings.TrimSpace(cfg.MarketplaceRegistryURL) == LegacyModuleMarketplaceRegistryURL {
-		cfg.MarketplaceRegistryURL = DefaultModuleMarketplaceRegistryURL
+	if strings.TrimSpace(cfg.MarketplaceRegistryURL) == LegacyManagedProviderRegistryURL {
+		cfg.MarketplaceRegistryURL = DefaultManagedProviderRegistryURL
 	}
 }

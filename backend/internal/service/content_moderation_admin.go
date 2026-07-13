@@ -241,6 +241,9 @@ func (s *ContentModerationService) readRiskControlEnabled(ctx context.Context) b
 	if s == nil || s.settingRepo == nil {
 		return false
 	}
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, s.settingRepo, ProgressiveFeatureRiskControl); overridden {
+		return enabled
+	}
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyRiskControlEnabled)
 	if err != nil {
 		return false

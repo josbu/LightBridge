@@ -192,6 +192,9 @@ func NewPaymentConfigService(entClient *dbent.Client, settingRepo SettingReposit
 
 // IsPaymentEnabled returns whether the payment system is enabled.
 func (s *PaymentConfigService) IsPaymentEnabled(ctx context.Context) bool {
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, s.settingRepo, ProgressiveFeaturePayment); overridden {
+		return enabled
+	}
 	val, err := s.settingRepo.GetValue(ctx, SettingPaymentEnabled)
 	if err != nil {
 		return false

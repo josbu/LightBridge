@@ -30,6 +30,7 @@ type FeatureRuntimeComponentStatus struct {
 	Name            string                       `json:"name"`
 	Feature         ProgressiveFeature           `json:"feature"`
 	Activation      ProgressiveFeatureActivation `json:"activation"`
+	Status          string                       `json:"status"`
 	Running         bool                         `json:"running"`
 	Started         bool                         `json:"started"`
 	CleanupRequired bool                         `json:"cleanupRequired,omitempty"`
@@ -511,10 +512,20 @@ func (m *FeatureRuntimeManager) Status() []FeatureRuntimeComponentStatus {
 	result := make([]FeatureRuntimeComponentStatus, 0, len(m.components))
 	for _, state := range m.components {
 		def, _ := ProgressiveFeatureDefinitionFor(state.component.Feature)
+		status := "idle"
+		switch {
+		case state.lastError != "":
+			status = "error"
+		case state.running:
+			status = "running"
+		case state.started:
+			status = "paused"
+		}
 		result = append(result, FeatureRuntimeComponentStatus{
 			Name:            state.component.Name,
 			Feature:         state.component.Feature,
 			Activation:      def.Activation,
+			Status:          status,
 			Running:         state.running,
 			Started:         state.started,
 			CleanupRequired: state.cleanupRequired,

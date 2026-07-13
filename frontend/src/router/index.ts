@@ -357,6 +357,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/features',
+    name: 'AdminFeatureRegistry',
+    component: () => import('@/views/admin/FeatureRegistryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Feature Registry',
+      titleKey: 'featureRegistry.title',
+      descriptionKey: 'featureRegistry.description',
+    },
+  },
+  {
     path: '/admin/settings/email',
     name: 'AdminEmailSettings',
     component: () => import('@/views/admin/SettingsView.vue'),

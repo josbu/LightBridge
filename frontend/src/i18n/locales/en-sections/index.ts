@@ -25,6 +25,7 @@ import admin from './admin'
 import subscriptionProgress from './subscriptionProgress'
 import version from './version'
 import modules from './modules'
+import featureRegistry from './featureRegistry'
 import purchase from './purchase'
 import customPage from './customPage'
 import announcements from './announcements'
@@ -60,6 +61,7 @@ export default {
   subscriptionProgress,
   version,
   modules,
+  featureRegistry,
   purchase,
   customPage,
   announcements,

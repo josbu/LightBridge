@@ -18,7 +18,7 @@ export default {
     modelCatalog: 'Model List',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
-    modules: 'Modules',
+    featureRegistry: 'Feature Registry',
     proxyModule: 'LightBridge Proxy',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',

@@ -57,6 +57,59 @@ func (h *SettingHandler) GetFeatureRuntimeStatus(c *gin.Context) {
 	response.Success(c, h.featureRuntime.Status())
 }
 
+// GetProgressiveFeatureControls returns the unified administrator registration
+// and runtime view. It is deliberately registered outside feature guards.
+// GET /api/v1/admin/features
+func (h *SettingHandler) GetProgressiveFeatureControls(c *gin.Context) {
+	response.Success(c, h.progressiveFeatureControlOverview(c))
+}
+
+type updateProgressiveFeatureControlRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+// UpdateProgressiveFeatureControl persists an explicit per-feature override.
+// PUT /api/v1/admin/features/:id
+func (h *SettingHandler) UpdateProgressiveFeatureControl(c *gin.Context) {
+	var req updateProgressiveFeatureControlRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.BadRequest(c, "enabled must be a boolean")
+		return
+	}
+	if err := h.settingService.SetProgressiveFeatureOverride(
+		c.Request.Context(),
+		service.ProgressiveFeature(strings.TrimSpace(c.Param("id"))),
+		req.Enabled,
+	); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, h.progressiveFeatureControlOverview(c))
+}
+
+// ResetProgressiveFeatureControl removes the database override and restores
+// inherited profile/configuration behavior.
+// DELETE /api/v1/admin/features/:id/override
+func (h *SettingHandler) ResetProgressiveFeatureControl(c *gin.Context) {
+	if err := h.settingService.SetProgressiveFeatureOverride(
+		c.Request.Context(),
+		service.ProgressiveFeature(strings.TrimSpace(c.Param("id"))),
+		nil,
+	); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, h.progressiveFeatureControlOverview(c))
+}
+
+func (h *SettingHandler) progressiveFeatureControlOverview(c *gin.Context) service.ProgressiveFeatureControlOverview {
+	var runtime []service.FeatureRuntimeComponentStatus
+	if h.featureRuntime != nil {
+		runtime = h.featureRuntime.Status()
+	}
+	return h.settingService.ProgressiveFeatureControlOverview(c.Request.Context(), runtime)
+}
+
 // GetPublicSettings 获取公开设置
 // GET /api/v1/settings/public
 func (h *SettingHandler) GetPublicSettings(c *gin.Context) {

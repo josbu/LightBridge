@@ -18,7 +18,7 @@ export default {
     modelCatalog: '模型列表',
     subscriptions: '订阅管理',
     accounts: '账号管理',
-    modules: '模块市场',
+    featureRegistry: '功能注册中心',
     proxyModule: 'LightBridge Proxy',
     proxies: 'IP管理',
     redeemCodes: '兑换码',

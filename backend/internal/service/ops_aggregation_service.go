@@ -357,6 +357,9 @@ func (s *OpsAggregationService) isMonitoringEnabled(ctx context.Context) bool {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, s.settingRepo, ProgressiveFeatureOpsMonitoring); overridden {
+		return enabled
+	}
 
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyOpsMonitoringEnabled)
 	if err != nil {

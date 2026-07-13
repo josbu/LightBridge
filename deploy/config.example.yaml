@@ -1047,11 +1047,13 @@ modules:
   # Ed25519 public key used to verify module package checksums.txt signatures
   # 用于验证模块包 checksums.txt 签名的 Ed25519 公钥文件
   signature_public_key_path: ""
-  # Marketplace registry published as a GitHub Release asset.
-  # 作为 GitHub Release 资产发布的模块市场索引。
+  # Internal registry used to provision LightBridge-managed provider runtimes.
+  # LightBridge 内部用于配置托管 Provider 运行时的索引。
+  # The marketplace_* key name is retained for backward compatibility; this is not a user-facing marketplace.
+  # marketplace_* 键名仅为向后兼容保留，不代表用户可见的模块市场。
   marketplace_registry_url: "https://github.com/WilliamWang1721/LightBridge/releases/download/module-anthropic-oauth-provider-v0.1.0/registry.json"
-  # Optional local registry file. When set, it takes precedence over marketplace_registry_url.
-  # 可选本地索引文件；设置后优先于 marketplace_registry_url。
+  # Optional local managed-provider registry. When set, it takes precedence over marketplace_registry_url.
+  # 可选本地托管 Provider 索引；设置后优先于 marketplace_registry_url。
   marketplace_registry_path: ""
   # Timeout in seconds for fetching the registry and module packages.
   # 拉取索引和模块包的超时时间（秒）。

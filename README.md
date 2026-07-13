@@ -61,7 +61,7 @@ It speaks the native dialects of all three major providers, so existing SDKs and
 **📊 Admin console**
 - Customizable, drag-and-drop dashboard cards: availability, concurrency, throughput, latency, error trends, token usage, model distribution, and more
 - Bulk user and account management, announcements, alerts, and system logs
-- Module marketplace to enable/disable built-in features on demand
+- Unified progressive feature registration and control plane
 
 ## Quick Start
 
@@ -170,7 +170,7 @@ LightBridge/
 │   │   ├── service/         # Business logic
 │   │   ├── repository/      # Data access
 │   │   ├── outbound/        # Upstream provider clients
-│   │   ├── modules/         # Module marketplace features
+│   │   ├── modules/         # Managed provider runtime
 │   │   └── server/          # Routing & middleware
 │   └── migrations/          # SQL migrations
 ├── frontend/                # Vue 3 admin console

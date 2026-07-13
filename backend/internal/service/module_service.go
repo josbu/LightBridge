@@ -238,54 +238,9 @@ func (s *ModuleService) InstallArchive(ctx context.Context, archivePath string) 
 	return installed, nil
 }
 
-func (s *ModuleService) Marketplace(ctx context.Context) (*ModuleMarketplaceResult, error) {
-	result := &ModuleMarketplaceResult{Modules: []ModuleMarketplaceEntry{}}
-	if s == nil {
-		return result, nil
-	}
-	registry, err := s.loadMarketplaceRegistry(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if registry == nil {
-		return result, nil
-	}
-	installed, err := s.store.ListInstalled(ctx)
-	if err != nil {
-		return nil, err
-	}
-	installedByID := make(map[string]modules.InstalledModule, len(installed))
-	for _, item := range installed {
-		installedByID[item.ID] = item
-	}
-	for _, entry := range registry.Modules {
-		entry.normalize()
-		if err := validateMarketplaceEntry(entry); err != nil {
-			return nil, infraerrors.BadRequest("MODULE_MARKETPLACE_INVALID_ENTRY", "module marketplace registry contains an invalid entry").WithCause(err)
-		}
-		if item, ok := installedByID[entry.ID]; ok {
-			entry.InstalledStatus = item.Status
-			entry.InstalledVersion = item.Version
-		}
-		if isManagedProviderMarketplaceEntry(entry) {
-			continue
-		}
-		result.Modules = append(result.Modules, entry)
-	}
-	sort.Slice(result.Modules, func(i, j int) bool {
-		left := result.Modules[i]
-		right := result.Modules[j]
-		if left.Name != right.Name {
-			return left.Name < right.Name
-		}
-		if left.ID != right.ID {
-			return left.ID < right.ID
-		}
-		return left.Version < right.Version
-	})
-	return result, nil
-}
-
+// InstallFromMarketplace retains its historical internal name for compatibility.
+// It is used only by managed provider provisioning; no marketplace install API
+// is registered for administrators or end users.
 func (s *ModuleService) InstallFromMarketplace(ctx context.Context, moduleID string, version string) (*modules.InstalledModule, error) {
 	moduleID = strings.TrimSpace(moduleID)
 	version = strings.TrimSpace(version)

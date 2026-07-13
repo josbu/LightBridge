@@ -267,6 +267,9 @@ func (c *OpsMetricsCollector) isMonitoringEnabled(ctx context.Context) bool {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if enabled, overridden := progressiveFeatureRepositoryOverride(ctx, c.settingRepo, ProgressiveFeatureOpsMonitoring); overridden {
+		return enabled
+	}
 
 	value, err := c.settingRepo.GetValue(ctx, SettingKeyOpsMonitoringEnabled)
 	if err != nil {

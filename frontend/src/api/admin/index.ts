@@ -33,7 +33,6 @@ import adminPaymentAPI from './payment'
 import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import privacyFilterAPI from './privacyFilter'
-import modulesAPI from './modules'
 import uiThemesAPI from './uiThemes'
 import availabilityAPI from './availability'
 
@@ -71,7 +70,6 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   riskControl: riskControlAPI,
   privacyFilter: privacyFilterAPI,
-  modules: modulesAPI,
   uiThemes: uiThemesAPI,
   availability: availabilityAPI
 }
@@ -107,7 +105,6 @@ export {
   affiliatesAPI,
   riskControlAPI,
   privacyFilterAPI,
-  modulesAPI,
   uiThemesAPI
 }
 

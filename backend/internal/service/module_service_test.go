@@ -177,58 +177,7 @@ func TestDecodeMarketplaceRegistryPreservesLocalizedModuleText(t *testing.T) {
 	}
 }
 
-func TestMarketplaceHidesManagedProviderModules(t *testing.T) {
-	registryPath := writeModuleMarketplaceRegistry(t, `{
-		"modules": [{
-			"id": "openai",
-			"version": "0.1.1",
-			"type": "provider",
-			"name": "OpenAI OAuth Provider",
-			"downloadUrl": "file:///tmp/lightbridge-module-openai-0.1.1.tar.zst",
-			"core": ">=0.1.0 <0.2.0",
-			"capabilities": ["provider.adapter"]
-		}, {
-			"id": "anthropic-oauth",
-			"version": "0.1.0",
-			"type": "provider",
-			"name": "Anthropic OAuth Provider",
-			"downloadUrl": "file:///tmp/lightbridge-module-anthropic-oauth-0.1.0.tar.zst",
-			"core": ">=0.1.0 <0.2.0",
-			"capabilities": ["provider.adapter"]
-		}, {
-			"id": "gemini",
-			"version": "0.1.0",
-			"type": "provider",
-			"name": "Gemini OAuth Provider",
-			"downloadUrl": "file:///tmp/lightbridge-module-gemini-0.1.0.tar.zst",
-			"core": ">=0.1.0 <0.2.0",
-			"capabilities": ["provider.adapter"]
-		}, {
-			"id": "lightbridge.proxy",
-			"version": "0.1.0",
-			"type": "outbound",
-			"name": "LightBridge Proxy",
-			"downloadUrl": "file:///tmp/lightbridge-module-proxy-0.1.0.tar.zst",
-			"core": ">=0.1.0 <0.2.0",
-			"capabilities": ["outbound.adapter"]
-		}]
-	}`)
-	svc := NewModuleService(&moduleServiceMemoryStore{})
-	svc.marketplaceRegistryPath = registryPath
-
-	result, err := svc.Marketplace(context.Background())
-	if err != nil {
-		t.Fatalf("load marketplace: %v", err)
-	}
-	if len(result.Modules) != 1 {
-		t.Fatalf("expected only non-provider module to remain visible, got %#v", result.Modules)
-	}
-	if got := result.Modules[0].ID; got != "lightbridge.proxy" {
-		t.Fatalf("expected proxy module to remain visible, got %q", got)
-	}
-}
-
-func TestAutoInstallManagedProviderModulesInstallsHiddenProviders(t *testing.T) {
+func TestAutoInstallManagedProviderModulesInstallsOnlyProviders(t *testing.T) {
 	dir := t.TempDir()
 	openAIArchive := writeModuleArchivePlaceholder(t, dir, "lightbridge-module-openai-0.1.1.tar.zst")
 	anthropicArchive := writeModuleArchivePlaceholder(t, dir, "lightbridge-module-anthropic-oauth-0.1.0.tar.zst")

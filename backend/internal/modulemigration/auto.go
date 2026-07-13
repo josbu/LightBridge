@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	DefaultModuleMigrationRegistryURL = config.DefaultModuleMarketplaceRegistryURL
+	DefaultModuleMigrationRegistryURL = config.DefaultManagedProviderRegistryURL
 	DefaultOpenAIModuleID             = "openai"
 	DefaultOpenAIModuleVersion        = "0.1.1"
 )

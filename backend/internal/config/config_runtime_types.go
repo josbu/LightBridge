@@ -55,8 +55,11 @@ type FeaturesConfig struct {
 }
 
 type ModuleConfig struct {
-	DataDir                   string `mapstructure:"data_dir"`
-	SignaturePublicKeyPath    string `mapstructure:"signature_public_key_path"`
+	DataDir                string `mapstructure:"data_dir"`
+	SignaturePublicKeyPath string `mapstructure:"signature_public_key_path"`
+	// MarketplaceRegistry* retain their historical names for configuration
+	// compatibility. They point to the internal managed-provider registry and
+	// are not exposed as a user-facing module marketplace.
 	MarketplaceRegistryPath   string `mapstructure:"marketplace_registry_path"`
 	MarketplaceRegistryURL    string `mapstructure:"marketplace_registry_url"`
 	MarketplaceTimeoutSeconds int    `mapstructure:"marketplace_timeout_seconds"`

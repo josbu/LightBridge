@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/WilliamWang1721/LightBridge/internal/config"
+	infraerrors "github.com/WilliamWang1721/LightBridge/internal/pkg/errors"
 )
 
 // ProgressiveFeature is a stable identifier shared by backend route guards,
@@ -108,6 +109,38 @@ type ProgressiveFeatureState struct {
 	Activation        ProgressiveFeatureActivation `json:"activation"`
 	MinimumProfile    config.FeatureProfile        `json:"minimumProfile"`
 	Surfaces          []ProgressiveFeatureSurface  `json:"surfaces,omitempty"`
+}
+
+const progressiveFeatureOverridePrefix = "progressive_feature_override."
+
+// ProgressiveFeatureControlState is the administrator control-plane view of a
+// registered feature. Override is nil when the feature follows its profile,
+// process configuration and legacy setting.
+type ProgressiveFeatureControlState struct {
+	ID                ProgressiveFeature              `json:"id"`
+	Label             string                          `json:"label"`
+	Tier              ProgressiveFeatureTier          `json:"tier"`
+	Activation        ProgressiveFeatureActivation    `json:"activation"`
+	Enabled           bool                            `json:"enabled"`
+	ConfiguredEnabled bool                            `json:"configuredEnabled"`
+	Available         bool                            `json:"available"`
+	Controllable      bool                            `json:"controllable"`
+	Override          *bool                           `json:"override"`
+	RequiresRestart   bool                            `json:"requiresRestart"`
+	Reason            string                          `json:"reason"`
+	MinimumProfile    config.FeatureProfile           `json:"minimumProfile"`
+	Dependencies      []ProgressiveFeature            `json:"dependencies"`
+	Surfaces          []ProgressiveFeatureSurface     `json:"surfaces"`
+	RuntimeComponents []FeatureRuntimeComponentStatus `json:"runtimeComponents"`
+}
+
+type ProgressiveFeatureControlOverview struct {
+	Profile  config.FeatureProfile            `json:"profile"`
+	Features []ProgressiveFeatureControlState `json:"features"`
+}
+
+func progressiveFeatureOverrideKey(id ProgressiveFeature) string {
+	return progressiveFeatureOverridePrefix + string(id)
 }
 
 type progressiveFeatureSnapshot struct {
@@ -492,6 +525,9 @@ func progressiveFeatureSettingKeys() []string {
 		if def.SettingKey != "" {
 			set[def.SettingKey] = struct{}{}
 		}
+		if def.Tier != ProgressiveFeatureTierCore {
+			set[progressiveFeatureOverrideKey(def.ID)] = struct{}{}
+		}
 	}
 	keys := make([]string, 0, len(set))
 	for key := range set {
@@ -552,7 +588,16 @@ func buildProgressiveFeatureSnapshot(
 			states[id] = state
 			return state
 		}
-		if cfg != nil {
+		dbOverride, hasDBOverride := parseProgressiveFeatureOverride(values[progressiveFeatureOverrideKey(id)])
+		if hasDBOverride && !dbOverride {
+			state.Reason = "control_override_disabled"
+			states[id] = state
+			return state
+		}
+		if hasDBOverride {
+			state.Enabled = true
+			state.Reason = "control_override_enabled"
+		} else if cfg != nil {
 			if override, exists := cfg.Features.Overrides[string(id)]; exists {
 				if !override {
 					state.Reason = "override_disabled"
@@ -565,7 +610,7 @@ func buildProgressiveFeatureSnapshot(
 				state.Reason = "override_enabled"
 			}
 		}
-		if !state.Enabled && featureProfileRank(profile) < featureProfileRank(def.MinimumProfile) {
+		if !hasDBOverride && !state.Enabled && featureProfileRank(profile) < featureProfileRank(def.MinimumProfile) {
 			state.Reason = "profile"
 			states[id] = state
 			return state
@@ -576,7 +621,7 @@ func buildProgressiveFeatureSnapshot(
 			states[id] = state
 			return state
 		}
-		if def.SettingKey != "" {
+		if !hasDBOverride && def.SettingKey != "" {
 			raw, exists := values[def.SettingKey]
 			enabled := def.DefaultEnabled
 			if exists {
@@ -626,6 +671,131 @@ func buildProgressiveFeatureSnapshot(
 		ordered:   ordered,
 		expiresAt: time.Now().Add(progressiveFeatureSnapshotTTL).UnixNano(),
 	}
+}
+
+func parseProgressiveFeatureOverride(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// progressiveFeatureRepositoryOverride lets services that own request-path
+// behavior consume the same explicit control-plane decision as route guards
+// and lifecycle components. When no override exists, callers retain their
+// legacy setting/default behavior.
+func progressiveFeatureRepositoryOverride(
+	ctx context.Context,
+	repo SettingRepository,
+	id ProgressiveFeature,
+) (bool, bool) {
+	if repo == nil {
+		return false, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, err := repo.GetValue(ctx, progressiveFeatureOverrideKey(id))
+	if err != nil {
+		return false, false
+	}
+	return parseProgressiveFeatureOverride(raw)
+}
+
+// ProgressiveFeatureControlOverview returns the complete administrator view.
+// Runtime diagnostics are supplied by the lifecycle manager so the registry
+// remains usable in tests and lightweight deployments without that manager.
+func (s *SettingService) ProgressiveFeatureControlOverview(
+	ctx context.Context,
+	runtime []FeatureRuntimeComponentStatus,
+) ProgressiveFeatureControlOverview {
+	manifest := s.ProgressiveFeatureManifest(ctx)
+	values := map[string]string{}
+	if s != nil && s.settingRepo != nil {
+		keys := make([]string, 0, len(progressiveFeatureDefinitions))
+		for _, def := range progressiveFeatureDefinitions {
+			if def.Tier != ProgressiveFeatureTierCore {
+				keys = append(keys, progressiveFeatureOverrideKey(def.ID))
+			}
+		}
+		if loaded, err := s.settingRepo.GetMultiple(ctx, keys); err == nil {
+			values = loaded
+		}
+	}
+	runtimeByFeature := make(map[ProgressiveFeature][]FeatureRuntimeComponentStatus)
+	for _, component := range runtime {
+		runtimeByFeature[component.Feature] = append(runtimeByFeature[component.Feature], component)
+	}
+
+	features := make([]ProgressiveFeatureControlState, 0, len(manifest))
+	for _, state := range manifest {
+		def, ok := progressiveFeatureDefinitions[state.ID]
+		if !ok {
+			continue
+		}
+		var override *bool
+		if value, exists := parseProgressiveFeatureOverride(values[progressiveFeatureOverrideKey(state.ID)]); exists {
+			copyValue := value
+			override = &copyValue
+		}
+		features = append(features, ProgressiveFeatureControlState{
+			ID:                state.ID,
+			Label:             def.Label,
+			Tier:              state.Tier,
+			Activation:        state.Activation,
+			Enabled:           state.Enabled,
+			ConfiguredEnabled: state.ConfiguredEnabled,
+			Available:         state.Enabled,
+			Controllable:      def.Tier != ProgressiveFeatureTierCore,
+			Override:          override,
+			RequiresRestart:   state.RequiresRestart,
+			Reason:            state.Reason,
+			MinimumProfile:    state.MinimumProfile,
+			Dependencies:      append([]ProgressiveFeature{}, def.Dependencies...),
+			Surfaces:          append([]ProgressiveFeatureSurface{}, state.Surfaces...),
+			RuntimeComponents: append([]FeatureRuntimeComponentStatus{}, runtimeByFeature[state.ID]...),
+		})
+	}
+	var cfg *config.Config
+	if s != nil {
+		cfg = s.cfg
+	}
+	return ProgressiveFeatureControlOverview{
+		Profile:  normalizedFeatureProfile(cfg),
+		Features: features,
+	}
+}
+
+// SetProgressiveFeatureOverride persists an explicit control-plane decision.
+// Passing nil restores inherited configuration. Lifecycle callbacks reconcile
+// dynamic components asynchronously; boot components remain restart-bound.
+func (s *SettingService) SetProgressiveFeatureOverride(ctx context.Context, id ProgressiveFeature, enabled *bool) error {
+	def, ok := progressiveFeatureDefinitions[id]
+	if !ok {
+		return infraerrors.NotFound("PROGRESSIVE_FEATURE_NOT_FOUND", "progressive feature not found")
+	}
+	if def.Tier == ProgressiveFeatureTierCore {
+		return infraerrors.BadRequest("PROGRESSIVE_FEATURE_NOT_CONTROLLABLE", "core features cannot be controlled")
+	}
+	if s == nil || s.settingRepo == nil {
+		return infraerrors.InternalServer("SETTING_REPOSITORY_UNAVAILABLE", "setting repository is unavailable")
+	}
+	key := progressiveFeatureOverrideKey(id)
+	var err error
+	if enabled == nil {
+		err = s.settingRepo.Delete(ctx, key)
+	} else {
+		err = s.settingRepo.Set(ctx, key, fmt.Sprintf("%t", *enabled))
+	}
+	if err != nil {
+		return fmt.Errorf("persist progressive feature override: %w", err)
+	}
+	s.runOnUpdateCallbacks()
+	return nil
 }
 
 func (s *SettingService) DeploymentMode(ctx context.Context) string {

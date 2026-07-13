@@ -114,8 +114,6 @@ func RegisterAdminRoutes(
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureAffiliate), h)
 
-		registerAdminModuleRoutes(progressiveAdminGroup(admin, settingService, service.ProgressiveFeatureModuleRuntime), h)
-
 		registerUIThemeRoutes(admin, h)
 	}
 }
@@ -541,6 +539,9 @@ func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/features", h.Setting.GetProgressiveFeatureControls)
+	admin.PUT("/features/:id", h.Setting.UpdateProgressiveFeatureControl)
+	admin.DELETE("/features/:id/override", h.Setting.ResetProgressiveFeatureControl)
 	admin.GET("/features/runtime", h.Setting.GetFeatureRuntimeStatus)
 	adminSettings := admin.Group("/settings")
 	{
@@ -781,23 +782,5 @@ func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			users.PUT("/:user_id", h.Admin.Affiliate.UpdateUserSettings)
 			users.DELETE("/:user_id", h.Admin.Affiliate.ClearUserSettings)
 		}
-	}
-}
-
-func registerAdminModuleRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	if h == nil || h.Admin == nil || h.Admin.Module == nil {
-		return
-	}
-	modules := admin.Group("/modules")
-	{
-		modules.GET("", h.Admin.Module.ListInstalled)
-		modules.GET("/marketplace", h.Admin.Module.Marketplace)
-		modules.POST("/marketplace/install", h.Admin.Module.InstallFromMarketplace)
-		modules.GET("/:id/permissions", h.Admin.Module.Permissions)
-		modules.POST("/:id/permissions/approve", h.Admin.Module.ApprovePermissions)
-		modules.POST("/:id/enable", h.Admin.Module.Enable)
-		modules.POST("/:id/disable", h.Admin.Module.Disable)
-		modules.POST("/:id/uninstall", h.Admin.Module.Uninstall)
-		modules.DELETE("/:id", h.Admin.Module.Purge)
 	}
 }
