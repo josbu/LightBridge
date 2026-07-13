@@ -404,7 +404,12 @@
   .modal-body {
     @apply px-4 py-3;
     @apply sm:px-6 sm:py-4;
-    @apply flex-1 overflow-y-auto;
+    /*
+     * A modal body is a flex child between a fixed header and footer. Without
+     * min-height: 0 it keeps its content's intrinsic height, so long release
+     * notes can push the footer below the viewport and hide the restart action.
+     */
+    @apply min-h-0 flex-1 overflow-y-auto;
   }
 
   .modal-footer {
