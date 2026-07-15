@@ -52,8 +52,30 @@ func TestGrokOAuthAuthorizationDefaultsToBuildContext(t *testing.T) {
 	require.Equal(t, xai.GrokBuildTokenReferrer, parsed.Query().Get("referrer"))
 }
 
-func TestGrokOAuthRejectsParsedTokenWithoutBuildReferrer(t *testing.T) {
+func TestGrokOAuthDefersParsedTokenWithoutBuildReferrerToUpstream(t *testing.T) {
 	client := &grokOAuthSecurityClient{accessToken: serviceJWT(`{"sub":"user"}`)}
+	service := NewGrokOAuthService(nil, client)
+	result, err := service.GenerateAuthURL(context.Background(), nil, "http://localhost:1455/auth/callback")
+	require.NoError(t, err)
+
+	info, err := service.ExchangeCode(context.Background(), &GrokExchangeCodeInput{
+		SessionID: result.SessionID,
+		Code:      "bare-code",
+		State:     result.State,
+	})
+	require.NoError(t, err)
+	require.Equal(t, xai.TokenCapabilityUnknown, info.TokenCapability)
+	require.Empty(t, info.TokenReferrer)
+	require.False(t, info.UsingAPI)
+	require.Equal(t, xai.DefaultCLIBaseURL, info.BaseURL)
+
+	creds := service.BuildAccountCredentials(info)
+	require.Equal(t, string(xai.TokenCapabilityUnknown), creds[GrokCredentialTokenCapability])
+	require.Equal(t, false, creds[GrokCredentialReauthRequired])
+}
+
+func TestGrokOAuthRejectsParsedTokenWithConflictingBuildReferrer(t *testing.T) {
+	client := &grokOAuthSecurityClient{accessToken: serviceJWT(`{"sub":"user","referrer":"lightbridge"}`)}
 	service := NewGrokOAuthService(nil, client)
 	result, err := service.GenerateAuthURL(context.Background(), nil, "http://localhost:1455/auth/callback")
 	require.NoError(t, err)
@@ -122,13 +144,16 @@ func TestGrokOAuthExchangeFreezesRedirectURIFromSession(t *testing.T) {
 	require.Empty(t, client.proxyURL)
 }
 
-func TestGrokOAuthRefreshRejectsBuildTokenThatLosesReferrer(t *testing.T) {
+func TestGrokOAuthRefreshDefersBuildTokenWithoutReferrerToUpstream(t *testing.T) {
 	client := &grokOAuthSecurityClient{refreshAccessToken: serviceJWT(`{"sub":"user","exp":4102444800}`)}
 	oauthService := NewGrokOAuthService(nil, client)
 
-	_, err := oauthService.RefreshToken(context.Background(), "refresh-token", "", "", xai.OAuthModeBuildProxy)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "grok_build_token_context_missing")
+	info, err := oauthService.RefreshToken(context.Background(), "refresh-token", "", "", xai.OAuthModeBuildProxy)
+	require.NoError(t, err)
+	require.Equal(t, xai.TokenCapabilityUnknown, info.TokenCapability)
+	require.Empty(t, info.TokenReferrer)
+	require.False(t, info.UsingAPI)
+	require.Equal(t, xai.DefaultCLIBaseURL, info.BaseURL)
 }
 
 func TestGrokOAuthRefreshAllowsOfficialTokenWithoutBuildReferrer(t *testing.T) {

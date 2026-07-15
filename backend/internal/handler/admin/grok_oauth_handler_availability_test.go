@@ -117,9 +117,11 @@ type grokAvailabilityUpstream struct {
 	status int
 	body   string
 	err    error
+	calls  int
 }
 
 func (u *grokAvailabilityUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -190,6 +192,25 @@ func TestVerifyGrokAccountAvailabilityKeepsAccountOnTransientFailure(t *testing.
 	result := handler.verifyGrokAccountAvailability(context.Background(), account, false)
 
 	require.Same(t, account, result)
+	require.Zero(t, adminService.setErrorCalls)
+	require.Equal(t, service.StatusActive, result.Status)
+	require.True(t, result.Schedulable)
+}
+
+func TestVerifyGrokAccountAvailabilityProbesTokenWithoutReferrer(t *testing.T) {
+	account := grokAvailabilityAccount()
+	account.Credentials["access_token"] = grokAvailabilityJWT(`{"sub":"user","exp":4102444800}`)
+	account.Credentials[service.GrokCredentialTokenCapability] = string(xai.TokenCapabilityUnknown)
+	upstream := &grokAvailabilityUpstream{
+		status: http.StatusOK,
+		body:   `{"id":"resp_probe","status":"completed"}`,
+	}
+	handler, adminService := newGrokAvailabilityHandler(account, upstream)
+
+	result := handler.verifyGrokAccountAvailability(context.Background(), account, false)
+
+	require.Same(t, account, result)
+	require.Equal(t, 1, upstream.calls)
 	require.Zero(t, adminService.setErrorCalls)
 	require.Equal(t, service.StatusActive, result.Status)
 	require.True(t, result.Schedulable)

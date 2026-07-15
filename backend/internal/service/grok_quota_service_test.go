@@ -348,7 +348,7 @@ func TestGrokQuotaServiceProbeUsageUsesBuildProxyIdentity(t *testing.T) {
 	require.Equal(t, "grok-pager/0.2.93 grok-shell/0.2.93 (linux; x86_64)", upstream.lastReq.Header.Get("User-Agent"))
 }
 
-func TestGrokQuotaServiceProbeUsageRejectsBuildTokenWithoutContext(t *testing.T) {
+func TestGrokQuotaServiceProbeUsageDefersBuildTokenWithoutReferrerToUpstream(t *testing.T) {
 	account := &Account{
 		ID:       48,
 		Platform: PlatformGrok,
@@ -360,10 +360,36 @@ func TestGrokQuotaServiceProbeUsageRejectsBuildTokenWithoutContext(t *testing.T)
 		},
 	}
 	repo := &grokQuotaAccountRepoForTest{accounts: map[int64]*Account{48: account}}
+	upstream := &grokQuotaHTTPUpstreamForTest{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_probe"}`)),
+	}}
+	svc := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream)
+
+	result, err := svc.ProbeUsage(context.Background(), 48)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://cli-chat-proxy.grok.com/v1/responses", upstream.lastReq.URL.String())
+}
+
+func TestGrokQuotaServiceProbeUsageRejectsBuildTokenWithConflictingReferrer(t *testing.T) {
+	account := &Account{
+		ID:       49,
+		Platform: PlatformGrok,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          grokQuotaJWT(`{"sub":"user-1","referrer":"lightbridge","exp":4102444800}`),
+			"expires_at":            time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			GrokCredentialOAuthMode: string(xai.OAuthModeBuildProxy),
+		},
+	}
+	repo := &grokQuotaAccountRepoForTest{accounts: map[int64]*Account{49: account}}
 	upstream := &grokQuotaHTTPUpstreamForTest{}
 	svc := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream)
 
-	_, err := svc.ProbeUsage(context.Background(), 48)
+	_, err := svc.ProbeUsage(context.Background(), 49)
 	require.Error(t, err)
 	require.Equal(t, http.StatusForbidden, infraerrors.Code(err))
 	require.Equal(t, "GROK_BUILD_TOKEN_CONTEXT_MISSING", infraerrors.Reason(err))

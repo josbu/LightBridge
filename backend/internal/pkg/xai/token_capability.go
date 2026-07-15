@@ -136,9 +136,9 @@ type TokenModeValidation struct {
 }
 
 // ValidateAccessTokenForMode classifies whether a token payload is compatible
-// with the selected OAuth mode. Opaque/non-JWT tokens remain "unknown" and are
-// allowed to reach xAI for authoritative validation. A syntactically valid JWT
-// that lacks the required Grok Build referrer fails fast.
+// with the selected OAuth mode. Opaque/non-JWT tokens and JWTs that omit the
+// optional referrer claim remain "unknown" and are allowed to reach xAI for
+// authoritative validation. Only an explicit, conflicting referrer fails fast.
 func ValidateAccessTokenForMode(token string, mode OAuthMode) TokenModeValidation {
 	mode = NormalizeOAuthMode(string(mode))
 	inspection := InspectAccessToken(token)
@@ -167,12 +167,12 @@ func ValidateAccessTokenForMode(token string, mode OAuthMode) TokenModeValidatio
 		validation.Reason = "access token carries the Grok Build referrer claim"
 		return validation
 	}
+	if inspection.Referrer == "" {
+		validation.Reason = "access token does not expose a referrer claim; capability will be verified by the Grok Build upstream"
+		return validation
+	}
 	validation.Capability = TokenCapabilityIncompatible
 	validation.Compatible = false
-	if inspection.Referrer == "" {
-		validation.Reason = "access token is missing referrer=grok-build"
-	} else {
-		validation.Reason = "access token referrer is not grok-build"
-	}
+	validation.Reason = "access token referrer is not grok-build"
 	return validation
 }

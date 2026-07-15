@@ -774,7 +774,7 @@ func accountDataGrokJWT(payload string) string {
 	return "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
 }
 
-func TestCPAXAIImportMarksBuildJWTWithoutReferrerForReauthorization(t *testing.T) {
+func TestCPAXAIImportDefersBuildJWTWithoutReferrerToUpstream(t *testing.T) {
 	account := cpaXAIToDataAccount(cpaImportPayload{
 		Type:         "xai",
 		Email:        "legacy-build@example.com",
@@ -786,10 +786,10 @@ func TestCPAXAIImportMarksBuildJWTWithoutReferrerForReauthorization(t *testing.T
 
 	require.Equal(t, service.PlatformGrok, account.Platform)
 	require.Equal(t, string(xai.OAuthModeBuildProxy), account.Credentials[service.GrokCredentialOAuthMode])
-	require.Equal(t, string(xai.TokenCapabilityIncompatible), account.Credentials[service.GrokCredentialTokenCapability])
-	require.Equal(t, true, account.Credentials[service.GrokCredentialReauthRequired])
-	require.Equal(t, true, account.Extra["grok_reauth_required"])
-	require.Contains(t, account.Extra["grok_reauth_reason"], "referrer=grok-build")
+	require.Equal(t, string(xai.TokenCapabilityUnknown), account.Credentials[service.GrokCredentialTokenCapability])
+	require.NotContains(t, account.Credentials, service.GrokCredentialReauthRequired)
+	require.NotContains(t, account.Extra, "grok_reauth_required")
+	require.NotContains(t, account.Extra, "grok_reauth_reason")
 }
 
 func TestCPAXAIImportAcceptsBuildJWTWithReferrer(t *testing.T) {
@@ -828,7 +828,7 @@ func TestImportDataDisablesIncompatibleGrokBuildAccount(t *testing.T) {
 		"data": map[string]any{
 			"type":          "xai",
 			"email":         "legacy-build@example.com",
-			"access_token":  accountDataGrokJWT(`{"sub":"legacy-user","exp":4102444800}`),
+			"access_token":  accountDataGrokJWT(`{"sub":"legacy-user","referrer":"lightbridge","exp":4102444800}`),
 			"refresh_token": "refresh-token",
 			"base_url":      xai.DefaultCLIBaseURL,
 			"using_api":     false,
@@ -847,6 +847,31 @@ func TestImportDataDisablesIncompatibleGrokBuildAccount(t *testing.T) {
 	require.Len(t, adminSvc.schedulableUpdates, 1)
 	require.Equal(t, int64(300), adminSvc.schedulableUpdates[0].accountID)
 	require.False(t, adminSvc.schedulableUpdates[0].schedulable)
+}
+
+func TestImportDataKeepsUnclassifiedGrokBuildAccountSchedulable(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	payload := map[string]any{
+		"data": map[string]any{
+			"type":          "xai",
+			"email":         "unclassified-build@example.com",
+			"access_token":  accountDataGrokJWT(`{"sub":"build-user","exp":4102444800}`),
+			"refresh_token": "refresh-token",
+			"base_url":      xai.DefaultCLIBaseURL,
+			"using_api":     false,
+		},
+		"skip_default_group_bind": true,
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, adminSvc.schedulableUpdates)
 }
 
 func TestImportDataKeepsCompatibleGrokBuildAccountSchedulable(t *testing.T) {

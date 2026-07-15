@@ -26,9 +26,15 @@ func TestValidateAccessTokenForBuildMode(t *testing.T) {
 	require.Equal(t, TokenCapabilityGrokBuild, valid.Capability)
 
 	missing := ValidateAccessTokenForMode(jwtWithPayload(`{"sub":"user"}`), OAuthModeBuildProxy)
-	require.False(t, missing.Compatible)
-	require.Equal(t, TokenCapabilityIncompatible, missing.Capability)
-	require.Contains(t, missing.Reason, "missing")
+	require.True(t, missing.Compatible)
+	require.Equal(t, TokenCapabilityUnknown, missing.Capability)
+	require.True(t, missing.Inspection.Parsed)
+	require.Contains(t, missing.Reason, "verified by the Grok Build upstream")
+
+	conflicting := ValidateAccessTokenForMode(jwtWithPayload(`{"sub":"user","referrer":"lightbridge"}`), OAuthModeBuildProxy)
+	require.False(t, conflicting.Compatible)
+	require.Equal(t, TokenCapabilityIncompatible, conflicting.Capability)
+	require.Contains(t, conflicting.Reason, "not grok-build")
 }
 
 func TestValidateOpaqueAccessTokenDefersToUpstream(t *testing.T) {

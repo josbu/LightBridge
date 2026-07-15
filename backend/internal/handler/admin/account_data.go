@@ -534,9 +534,10 @@ func (h *AccountHandler) importData(ctx context.Context, dataPayload DataPayload
 			})
 			continue
 		}
-		// A parsed Grok Build JWT that lacks referrer=grok-build is imported for
-		// recovery only, but must not enter the scheduler until the operator
-		// completes a fresh Grok Build OAuth authorization.
+		// Only a Grok Build token with an explicitly conflicting OAuth context is
+		// imported for recovery without entering the scheduler. Tokens that do not
+		// expose the optional referrer claim are left for authoritative upstream
+		// validation.
 		if needsGrokReauthorization {
 			if _, disableErr := h.adminService.SetAccountSchedulable(ctx, created.ID, false); disableErr != nil {
 				result.Errors = append(result.Errors, DataImportError{

@@ -46,9 +46,10 @@ func (a *Account) GrokTokenCapability() xai.TokenCapability {
 	return xai.ValidateAccessTokenForMode(a.GetGrokAccessToken(), a.GrokOAuthMode()).Capability
 }
 
-// GrokBuildTokenCompatible performs a cheap scheduling guard. Opaque tokens are
-// allowed to reach xAI for authoritative validation, while a parsed JWT that is
-// known to lack the Grok Build referrer is kept out of the scheduler.
+// GrokBuildTokenCompatible performs a cheap scheduling guard. Opaque tokens and
+// JWTs without a referrer claim are allowed to reach xAI for authoritative
+// validation, while an explicitly conflicting referrer is kept out of the
+// scheduler.
 func (a *Account) GrokBuildTokenCompatible() bool {
 	if a == nil || !a.IsGrok() || a.GrokUsingAPI() {
 		return true

@@ -16,7 +16,7 @@ func grokServiceJWT(rawPayload string) string {
 	return "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString([]byte(rawPayload)) + ".signature"
 }
 
-func TestGrokBuildAccountWithoutReferrerIsNotSchedulable(t *testing.T) {
+func TestGrokBuildAccountWithoutReferrerDefersToUpstream(t *testing.T) {
 	account := &Account{
 		Platform:    PlatformGrok,
 		Type:        AccountTypeOAuth,
@@ -24,6 +24,22 @@ func TestGrokBuildAccountWithoutReferrerIsNotSchedulable(t *testing.T) {
 		Schedulable: true,
 		Credentials: map[string]any{
 			"access_token":          grokServiceJWT(`{"sub":"user"}`),
+			"using_api":             false,
+			GrokCredentialOAuthMode: string(xai.OAuthModeBuildProxy),
+		},
+	}
+	require.True(t, account.GrokBuildTokenCompatible())
+	require.True(t, account.IsSchedulable())
+}
+
+func TestGrokBuildAccountWithConflictingReferrerIsNotSchedulable(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"access_token":          grokServiceJWT(`{"sub":"user","referrer":"lightbridge"}`),
 			"using_api":             false,
 			GrokCredentialOAuthMode: string(xai.OAuthModeBuildProxy),
 		},
@@ -68,11 +84,31 @@ func (c *grokCapabilityCache) AcquireRefreshLock(context.Context, string, time.D
 }
 func (c *grokCapabilityCache) ReleaseRefreshLock(context.Context, string) error { return nil }
 
-func TestGrokTokenProviderRejectsCachedTokenWithoutBuildReferrer(t *testing.T) {
+func TestGrokTokenProviderDefersCachedTokenWithoutBuildReferrerToUpstream(t *testing.T) {
 	cache := &grokCapabilityCache{token: grokServiceJWT(`{"sub":"user"}`)}
 	provider := NewGrokTokenProvider(nil, cache)
 	account := &Account{
 		ID:       91,
+		Platform: PlatformGrok,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          cache.token,
+			"using_api":             false,
+			GrokCredentialOAuthMode: string(xai.OAuthModeBuildProxy),
+		},
+	}
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, cache.token, token)
+	require.False(t, cache.deleted)
+}
+
+func TestGrokTokenProviderRejectsCachedTokenWithConflictingBuildReferrer(t *testing.T) {
+	cache := &grokCapabilityCache{token: grokServiceJWT(`{"sub":"user","referrer":"lightbridge"}`)}
+	provider := NewGrokTokenProvider(nil, cache)
+	account := &Account{
+		ID:       92,
 		Platform: PlatformGrok,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
