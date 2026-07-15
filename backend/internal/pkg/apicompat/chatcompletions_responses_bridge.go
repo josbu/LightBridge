@@ -27,6 +27,7 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 		Temperature:         req.Temperature,
 		TopP:                req.TopP,
 		Stream:              req.Stream,
+		ParallelToolCalls:   req.ParallelToolCalls,
 		ServiceTier:         req.ServiceTier,
 	}
 	if req.Reasoning != nil {
@@ -97,20 +98,28 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 			if strings.TrimSpace(arguments) == "" {
 				arguments = "{}"
 			}
-			messages = append(messages, ChatMessage{
-				Role: "assistant",
-				ToolCalls: []ChatToolCall{{
-					ID:   rawString(item["call_id"]),
-					Type: "function",
-					Function: ChatFunctionCall{
-						Name:      rawString(item["name"]),
-						Arguments: arguments,
-					},
-				}},
+			callID := rawString(item["call_id"])
+			if callID == "" {
+				callID = rawString(item["id"])
+			}
+			name := strings.TrimSpace(rawString(item["name"]))
+			if name == "" {
+				return nil, fmt.Errorf("responses function_call name is empty")
+			}
+			appendResponsesFunctionCallToChatMessages(&messages, ChatToolCall{
+				ID:   callID,
+				Type: "function",
+				Function: ChatFunctionCall{
+					Name:      name,
+					Arguments: arguments,
+				},
 			})
 			continue
 		case "function_call_output":
-			content, _ := json.Marshal(rawString(item["output"]))
+			content, err := responsesFunctionOutputToChatContent(item["output"])
+			if err != nil {
+				return nil, err
+			}
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: rawString(item["call_id"]),
@@ -147,6 +156,35 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 	}
 
 	return messages, nil
+}
+
+func appendResponsesFunctionCallToChatMessages(messages *[]ChatMessage, call ChatToolCall) {
+	if messages == nil {
+		return
+	}
+	if count := len(*messages); count > 0 && (*messages)[count-1].Role == "assistant" {
+		(*messages)[count-1].ToolCalls = append((*messages)[count-1].ToolCalls, call)
+		return
+	}
+	*messages = append(*messages, ChatMessage{
+		Role:      "assistant",
+		ToolCalls: []ChatToolCall{call},
+	})
+}
+
+func responsesFunctionOutputToChatContent(raw json.RawMessage) (json.RawMessage, error) {
+	raw = bytesTrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.Marshal("")
+	}
+	var output string
+	if err := json.Unmarshal(raw, &output); err == nil {
+		return json.Marshal(output)
+	}
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("parse responses function_call_output: invalid JSON")
+	}
+	return json.Marshal(string(raw))
 }
 
 func chatCompletionsBridgeRole(role string) string {
@@ -464,6 +502,9 @@ type ChatCompletionsToResponsesStreamState struct {
 	text               strings.Builder
 	reasoning          strings.Builder
 	toolCalls          map[int]*chatToResponsesStreamTool
+	toolCallIDs        map[string]int
+	unindexedTools     map[int]int
+	nextSyntheticIndex int
 	outputOrder        []chatToResponsesOutputRef
 
 	FinishReason string
@@ -475,8 +516,9 @@ type chatToResponsesStreamTool struct {
 	OutputIndex int
 	ItemID      string
 	CallID      string
+	SyntheticID bool
 	Name        string
-	Arguments   strings.Builder
+	Arguments   string
 	Done        bool
 }
 
@@ -494,6 +536,8 @@ func NewChatCompletionsToResponsesStreamState(model string) *ChatCompletionsToRe
 		messageOutputIndex: -1,
 		reasoningOutputIdx: -1,
 		toolCalls:          make(map[int]*chatToResponsesStreamTool),
+		toolCallIDs:        make(map[string]int),
+		unindexedTools:     make(map[int]int),
 		Usage:              &ResponsesUsage{},
 	}
 }
@@ -547,22 +591,16 @@ func ChatCompletionsChunkToResponsesEvents(
 				ItemID:       state.reasoningItemID,
 			}))
 		}
-		for _, toolCall := range choice.Delta.ToolCalls {
-			idx := 0
-			if toolCall.Index != nil {
-				idx = *toolCall.Index
-			}
-			stored, added := ensureChatToResponsesTool(state, idx, toolCall)
-			events = append(events, added...)
-			if toolCall.Function.Arguments != "" {
-				_, _ = stored.Arguments.WriteString(toolCall.Function.Arguments)
-				events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.delta", &ResponsesStreamEvent{
-					OutputIndex: stored.OutputIndex,
-					Delta:       toolCall.Function.Arguments,
-					ItemID:      stored.ItemID,
-				}))
-			}
+		for ordinal, toolCall := range choice.Delta.ToolCalls {
+			idx := resolveChatToResponsesToolIndex(state, ordinal, toolCall)
+			stored := ensureChatToResponsesTool(state, idx, toolCall)
+			mergeChatToResponsesToolDelta(state, stored, toolCall)
 		}
+		// Do not expose a function_call item until its upstream stream is
+		// complete. Some compatible routers split function names ("list" +
+		// "_dir") or repeat cumulative argument snapshots. Grok Build binds the
+		// tool implementation from output_item.added and will classify a partial
+		// name as an unknown/"Other" tool for the rest of the session.
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
 			state.FinishReason = *choice.FinishReason
 			events = append(events, finalizeChatToResponsesOutputItems(state)...)
@@ -662,15 +700,13 @@ func ensureChatToResponsesTool(
 	state *ChatCompletionsToResponsesStreamState,
 	chatIndex int,
 	toolCall ChatToolCall,
-) (*chatToResponsesStreamTool, []ResponsesStreamEvent) {
+) *chatToResponsesStreamTool {
 	if stored := state.toolCalls[chatIndex]; stored != nil {
-		if stored.Name == "" && strings.TrimSpace(toolCall.Function.Name) != "" {
-			stored.Name = strings.TrimSpace(toolCall.Function.Name)
-		}
-		return stored, nil
+		return stored
 	}
 
 	callID := strings.TrimSpace(toolCall.ID)
+	syntheticID := callID == ""
 	if callID == "" {
 		callID = "call_" + strings.TrimPrefix(generateItemID(), "item_")
 	}
@@ -679,10 +715,88 @@ func ensureChatToResponsesTool(
 		OutputIndex: state.nextIndex("tool", chatIndex),
 		ItemID:      generateItemID(),
 		CallID:      callID,
-		Name:        strings.TrimSpace(toolCall.Function.Name),
+		SyntheticID: syntheticID,
 	}
 	state.toolCalls[chatIndex] = stored
-	return stored, []ResponsesStreamEvent{chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
+	return stored
+}
+
+func resolveChatToResponsesToolIndex(
+	state *ChatCompletionsToResponsesStreamState,
+	ordinal int,
+	toolCall ChatToolCall,
+) int {
+	if toolCall.Index != nil {
+		idx := *toolCall.Index
+		state.unindexedTools[ordinal] = idx
+		if callID := strings.TrimSpace(toolCall.ID); callID != "" {
+			state.toolCallIDs[callID] = idx
+		}
+		return idx
+	}
+	if callID := strings.TrimSpace(toolCall.ID); callID != "" {
+		if idx, ok := state.toolCallIDs[callID]; ok {
+			return idx
+		}
+	}
+	if idx, ok := state.unindexedTools[ordinal]; ok {
+		if callID := strings.TrimSpace(toolCall.ID); callID == "" || state.toolCalls[idx] == nil || state.toolCalls[idx].SyntheticID {
+			return idx
+		}
+	}
+
+	idx := state.nextSyntheticIndex
+	for state.toolCalls[idx] != nil {
+		idx++
+	}
+	state.nextSyntheticIndex = idx + 1
+	state.unindexedTools[ordinal] = idx
+	if callID := strings.TrimSpace(toolCall.ID); callID != "" {
+		state.toolCallIDs[callID] = idx
+	}
+	return idx
+}
+
+func mergeChatToResponsesToolDelta(
+	state *ChatCompletionsToResponsesStreamState,
+	stored *chatToResponsesStreamTool,
+	toolCall ChatToolCall,
+) {
+	if state == nil || stored == nil {
+		return
+	}
+	if callID := strings.TrimSpace(toolCall.ID); callID != "" {
+		state.toolCallIDs[callID] = stored.ChatIndex
+		if stored.SyntheticID {
+			stored.CallID = callID
+			stored.SyntheticID = false
+		}
+	}
+	stored.Name = mergeChatStreamFragment(stored.Name, strings.TrimSpace(toolCall.Function.Name))
+	stored.Arguments = mergeChatStreamFragment(stored.Arguments, toolCall.Function.Arguments)
+}
+
+func mergeChatStreamFragment(current string, incoming string) string {
+	if incoming == "" {
+		return current
+	}
+	if current == "" {
+		return incoming
+	}
+	if incoming == current || strings.HasPrefix(current, incoming) {
+		return current
+	}
+	if strings.HasPrefix(incoming, current) {
+		return incoming
+	}
+	return current + incoming
+}
+
+func addChatToResponsesToolItem(
+	state *ChatCompletionsToResponsesStreamState,
+	stored *chatToResponsesStreamTool,
+) []ResponsesStreamEvent {
+	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
 		OutputIndex: stored.OutputIndex,
 		Item: &ResponsesOutput{
 			Type:      "function_call",
@@ -739,7 +853,15 @@ func finalizeChatToResponsesOutputItems(state *ChatCompletionsToResponsesStreamS
 				continue
 			}
 			tool.Done = true
-			arguments := normalizedToolArguments(tool.Arguments.String())
+			arguments := normalizedToolArguments(tool.Arguments)
+			events = append(events, addChatToResponsesToolItem(state, tool)...)
+			if tool.Arguments != "" {
+				events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.delta", &ResponsesStreamEvent{
+					OutputIndex: tool.OutputIndex,
+					Delta:       tool.Arguments,
+					ItemID:      tool.ItemID,
+				}))
+			}
 			events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.done", &ResponsesStreamEvent{
 				OutputIndex: tool.OutputIndex,
 				ItemID:      tool.ItemID,
@@ -804,7 +926,7 @@ func (state *ChatCompletionsToResponsesStreamState) toolOutput(tool *chatToRespo
 		ID:        tool.ItemID,
 		CallID:    tool.CallID,
 		Name:      tool.Name,
-		Arguments: normalizedToolArguments(tool.Arguments.String()),
+		Arguments: normalizedToolArguments(tool.Arguments),
 		Status:    status,
 	}
 }

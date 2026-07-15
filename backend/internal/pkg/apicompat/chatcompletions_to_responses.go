@@ -27,12 +27,13 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	}
 
 	out := &ResponsesRequest{
-		Model:        req.Model,
-		Instructions: req.Instructions,
-		Input:        inputJSON,
-		Stream:       true, // upstream always streams
-		Include:      []string{"reasoning.encrypted_content"},
-		ServiceTier:  req.ServiceTier,
+		Model:             req.Model,
+		Instructions:      req.Instructions,
+		Input:             inputJSON,
+		Stream:            true, // upstream always streams
+		Include:           []string{"reasoning.encrypted_content"},
+		ParallelToolCalls: req.ParallelToolCalls,
+		ServiceTier:       req.ServiceTier,
 	}
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.
@@ -74,10 +75,14 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		out.Tools = convertChatToolsToResponses(req.Tools, req.Functions)
 	}
 
-	// tool_choice: already compatible format — pass through directly.
-	// Legacy function_call needs mapping.
+	// Chat Completions nests a forced function name under "function", while
+	// Responses expects it at the top level. String choices are shared.
 	if len(req.ToolChoice) > 0 {
-		out.ToolChoice = req.ToolChoice
+		tc, err := convertChatToolChoiceToResponses(req.ToolChoice)
+		if err != nil {
+			return nil, fmt.Errorf("convert tool_choice: %w", err)
+		}
+		out.ToolChoice = tc
 	} else if len(req.FunctionCall) > 0 {
 		tc, err := convertChatFunctionCallToToolChoice(req.FunctionCall)
 		if err != nil {
@@ -87,6 +92,32 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	}
 
 	return out, nil
+}
+
+func convertChatToolChoiceToResponses(raw json.RawMessage) (json.RawMessage, error) {
+	var choice string
+	if err := json.Unmarshal(raw, &choice); err == nil {
+		return json.Marshal(choice)
+	}
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	if rawString(obj["type"]) != "function" {
+		return raw, nil
+	}
+	name := rawString(obj["name"])
+	if name == "" {
+		name = rawNestedString(obj["function"], "name")
+	}
+	if name == "" {
+		return nil, fmt.Errorf("function tool_choice name is empty")
+	}
+	return json.Marshal(map[string]string{
+		"type": "function",
+		"name": name,
+	})
 }
 
 // convertChatMessagesToResponsesInput converts the Chat Completions messages

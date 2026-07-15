@@ -44,7 +44,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+	if shouldBridgeResponsesThroughChatCompletions(ctx, c, account) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 
@@ -895,4 +895,36 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return forwardResult, nil
 	}
+}
+
+func shouldBridgeResponsesThroughChatCompletions(ctx context.Context, c *gin.Context, account *Account) bool {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return false
+	}
+	if TargetProtocolFromContext(ctx) == CustomProtocolOpenAIChatCompletions {
+		return true
+	}
+	if !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+		return true
+	}
+
+	// Grok Build rejects incomplete or internally inconsistent Responses SSE
+	// tool lifecycles. OpenAI-compatible routers such as LiteLLM may advertise a
+	// /responses endpoint while internally bridging a Chat Completions stream;
+	// observed malformed chains include missing sequence_number fields and an
+	// unmatched empty message item after a function call. Use LightBridge's
+	// strict bridge for this client so one implementation owns the complete
+	// function-call lifecycle.
+	profile := RouterClientProfileFromContext(ctx)
+	if profile.Kind == RouterClientUnknown && c != nil && c.Request != nil {
+		profile = DetectRouterClientProfile(c.Request)
+	}
+	if profile.Kind != RouterClientGrokBuild {
+		return false
+	}
+	if mode, ok := account.Extra[openai_compat.ExtraKeyResponsesMode].(string); ok &&
+		openai_compat.NormalizeResponsesSupportMode(mode) == openai_compat.ResponsesSupportModeForceResponses {
+		return false
+	}
+	return true
 }

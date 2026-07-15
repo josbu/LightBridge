@@ -113,6 +113,22 @@ func TestChatCompletionsToResponses_ToolCalls(t *testing.T) {
 	assert.Equal(t, "ping", resp.Tools[0].Name)
 }
 
+func TestChatCompletionsToResponses_ForcedToolChoiceAndParallelCalls(t *testing.T) {
+	parallel := true
+	req := &ChatCompletionsRequest{
+		Model:             "grok-test",
+		Messages:          []ChatMessage{{Role: "user", Content: json.RawMessage(`"inspect"`)}},
+		ParallelToolCalls: &parallel,
+		ToolChoice:        json.RawMessage(`{"type":"function","function":{"name":"list_dir"}}`),
+	}
+
+	resp, err := ChatCompletionsToResponses(req)
+	require.NoError(t, err)
+	require.NotNil(t, resp.ParallelToolCalls)
+	assert.True(t, *resp.ParallelToolCalls)
+	assert.JSONEq(t, `{"type":"function","name":"list_dir"}`, string(resp.ToolChoice))
+}
+
 func TestChatCompletionsToResponses_MaxTokens(t *testing.T) {
 	t.Run("max_tokens", func(t *testing.T) {
 		maxTokens := 100

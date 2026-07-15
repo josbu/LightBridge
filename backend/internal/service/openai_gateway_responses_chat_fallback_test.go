@@ -137,6 +137,100 @@ func TestForwardResponses_AutoSupportedAccountStillUsesResponsesEndpoint(t *test
 	require.Equal(t, "ok", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
 }
 
+func TestForwardResponses_GrokBuildUsesStrictChatBridgeForLiteLLMToolCalls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"grok-4-fast",
+		"input":"list the current directory",
+		"stream":true,
+		"parallel_tool_calls":true,
+		"tools":[{"type":"function","name":"list_dir","description":"List a directory","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]},"strict":true}]
+	}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "grok-shell/0.2.101 (linux; x86_64)")
+
+	upstreamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"grok-4-fast","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_list","type":"function","function":{"name":"list","arguments":"{\"path\""}}]},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"grok-4-fast","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_list","type":"function","function":{"name":"_dir","arguments":"{\"path\":\".\"}"}}]},"finish_reason":""}]}`,
+		"",
+		`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"grok-4-fast","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":5,"total_tokens":25}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_grok_tool"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["base_url"] = "http://litellm.example/v1"
+	account.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+		openai_compat.ExtraKeyResponsesSupported: true,
+	}
+	ctx := WithRouterClientProfile(context.Background(), DetectRouterClientProfile(c.Request))
+
+	result, err := svc.Forward(ctx, c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "http://litellm.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "list_dir", gjson.GetBytes(upstream.lastBody, "tools.0.function.name").String())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "tools.0.function.strict").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
+
+	streamBody := rec.Body.String()
+	require.Contains(t, streamBody, `"type":"function_call"`)
+	require.Contains(t, streamBody, `"call_id":"call_list"`)
+	require.Contains(t, streamBody, `"name":"list_dir"`)
+	require.Contains(t, streamBody, `"arguments":"{\"path\":\".\"}"`)
+	require.NotContains(t, streamBody, `"name":"list"`)
+	require.Contains(t, streamBody, "event: response.completed")
+	require.Contains(t, streamBody, "data: [DONE]")
+	for _, line := range strings.Split(streamBody, "\n") {
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok || payload == "[DONE]" || !gjson.Valid(payload) {
+			continue
+		}
+		require.True(t, gjson.Get(payload, "sequence_number").Exists(), "event is missing sequence_number: %s", payload)
+	}
+	require.Equal(t, 20, result.Usage.InputTokens)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+}
+
+func TestShouldBridgeResponsesThroughChatCompletions_HonorsRouteAndManualOverride(t *testing.T) {
+	autoSupported := rawChatCompletionsTestAccount()
+	autoSupported.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+		openai_compat.ExtraKeyResponsesSupported: true,
+	}
+	routeCtx := WithProtocolRouteDecision(context.Background(), ProtocolRouteDecision{
+		TargetProtocol: CustomProtocolOpenAIChatCompletions,
+	})
+	require.True(t, shouldBridgeResponsesThroughChatCompletions(routeCtx, nil, autoSupported))
+
+	grokCtx := WithRouterClientProfile(context.Background(), RouterClientProfile{
+		Kind:                    RouterClientGrokBuild,
+		StrictResponsesTerminal: true,
+	})
+	require.True(t, shouldBridgeResponsesThroughChatCompletions(grokCtx, nil, autoSupported))
+
+	forceResponses := rawChatCompletionsTestAccount()
+	forceResponses.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceResponses),
+	}
+	require.False(t, shouldBridgeResponsesThroughChatCompletions(grokCtx, nil, forceResponses))
+}
+
 func forceChatResponsesFallbackAccount() *Account {
 	account := rawChatCompletionsTestAccount()
 	account.Extra = map[string]any{
