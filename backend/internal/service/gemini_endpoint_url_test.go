@@ -29,4 +29,3 @@ func TestBuildGeminiModelActionURLNormalizesBaseURL(t *testing.T) {
 		})
 	}
 }
-
