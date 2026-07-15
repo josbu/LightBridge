@@ -546,13 +546,6 @@ func buildModelsURLForProtocol(base, protocol string) string {
 	return strings.TrimRight(parsed.String(), "/")
 }
 
-type upstreamModelEntry struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Model   string `json:"model"`
-	ModelID string `json:"model_id"`
-}
-
 func extractUpstreamModelIDs(body []byte) ([]string, error) {
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -595,20 +588,6 @@ func collectUpstreamModelIDs(value any, models *[]string, depth int) {
 			collectUpstreamModelIDs(nested, models, depth+1)
 		}
 	}
-}
-
-func upstreamModelEntryID(entry upstreamModelEntry) string {
-	modelID := strings.TrimSpace(entry.ID)
-	if modelID == "" {
-		modelID = strings.TrimSpace(entry.Name)
-	}
-	if modelID == "" {
-		modelID = strings.TrimSpace(entry.Model)
-	}
-	if modelID == "" {
-		modelID = strings.TrimSpace(entry.ModelID)
-	}
-	return strings.TrimPrefix(modelID, "models/")
 }
 
 func dedupeAndSortModelIDs(models []string) []string {

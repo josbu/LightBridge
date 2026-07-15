@@ -14,4 +14,3 @@ func TestBuildAnthropicMessagesURLNormalizesBaseURL(t *testing.T) {
 	require.Equal(t, "https://example.com/v1/messages?beta=true", buildAnthropicMessagesURL("https://example.com/v1/messages", false))
 	require.Equal(t, "https://example.com/v1/messages/count_tokens?beta=true", buildAnthropicMessagesURL("https://example.com/v1", true))
 }
-

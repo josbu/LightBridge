@@ -7,4 +7,3 @@ func buildAnthropicMessagesURL(base string, countTokens bool) string {
 	}
 	return buildOpenAIEndpointURL(base, endpoint) + "?beta=true"
 }
-

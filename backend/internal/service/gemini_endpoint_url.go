@@ -15,4 +15,3 @@ func buildGeminiModelActionURL(base, model, action string, stream bool) string {
 	}
 	return target
 }
-
