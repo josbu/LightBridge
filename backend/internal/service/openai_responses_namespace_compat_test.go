@@ -102,6 +102,60 @@ func TestOpenAIGatewayPassthroughRetriesRejectedInputNamespaceOnce(t *testing.T)
 	require.Equal(t, "ok", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
 }
 
+func TestOpenAIGatewayForwardRetriesRejectedInputNamespaceForStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := namespaceCompatibilityStreamingRequestBody()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{responses: namespaceCompatibilityStreamingResponses()}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+	account := namespaceCompatibilityAccount(false)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "mcp__docs", gjson.GetBytes(upstream.bodies[0], "input.0.namespace").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.namespace").Exists())
+	require.Contains(t, rec.Body.String(), `"type":"response.output_text.delta"`)
+	require.Contains(t, rec.Body.String(), `"type":"response.completed"`)
+	require.NotContains(t, rec.Body.String(), "Upstream request failed")
+}
+
+func TestOpenAIGatewayPassthroughRetriesRejectedInputNamespaceForStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := namespaceCompatibilityStreamingRequestBody()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{responses: namespaceCompatibilityStreamingResponses()}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+	account := namespaceCompatibilityAccount(true)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "mcp__docs", gjson.GetBytes(upstream.bodies[0], "input.0.namespace").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.namespace").Exists())
+	require.Contains(t, rec.Body.String(), `"type":"response.output_text.delta"`)
+	require.Contains(t, rec.Body.String(), `"type":"response.completed"`)
+	require.NotContains(t, rec.Body.String(), "Upstream request failed")
+}
+
 func namespaceCompatibilityRequestBody() []byte {
 	return []byte(`{
 		"model":"gpt-5.6-sol",
@@ -113,6 +167,10 @@ func namespaceCompatibilityRequestBody() []byte {
 		],
 		"tools":[{"type":"namespace","name":"mcp__docs","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}]
 	}`)
+}
+
+func namespaceCompatibilityStreamingRequestBody() []byte {
+	return bytes.Replace(namespaceCompatibilityRequestBody(), []byte(`"stream":false`), []byte(`"stream":true`), 1)
 }
 
 func namespaceCompatibilityResponses() []*http.Response {
@@ -130,6 +188,30 @@ func namespaceCompatibilityResponses() []*http.Response {
 			Body: io.NopCloser(strings.NewReader(
 				`{"id":"resp_namespace_retry_ok","object":"response","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}],"status":"completed"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}`,
 			)),
+		},
+	}
+}
+
+func namespaceCompatibilityStreamingResponses() []*http.Response {
+	return []*http.Response{
+		{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[18].namespace'.","param":"input[18].namespace","type":"invalid_request_error"}}`,
+			)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_namespace_stream_retry_ok"}},
+			Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp_namespace_stream_retry_ok","model":"gpt-5.6-sol","status":"in_progress","output":[]}}`,
+				"",
+				`data: {"type":"response.output_text.delta","delta":"ok"}`,
+				"",
+				`data: {"type":"response.completed","response":{"id":"resp_namespace_stream_retry_ok","object":"response","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}],"status":"completed"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
+				"",
+			}, "\n"))),
 		},
 	}
 }
